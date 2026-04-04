@@ -4,17 +4,40 @@ Minimal Python-webserver som fundament for et kommende dashboard over:
 - status på systemer
 - tilsluttede enheder i hjemmenetværket
 
+## Krav
+
+- Python 3.10+
+
+## Installation
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
 ## Kør lokalt
 
 ```bash
-python3 app.py
+python3 server.py
 ```
 
-Serveren starter som standard på `http://localhost:8000`.
+Serveren lytter på `0.0.0.0` og kører som standard på `http://localhost:8000`.
 
-## Næste skridt
+Du kan ændre port via miljøvariablen `PORT`:
 
-1. Erstat statisk HTML med templates.
-2. Tilføj endpoint(s) til system- og enhedsdata.
-3. Tilføj health-check endpoint (`/health`).
-4. Tilføj tests og CI.
+```bash
+PORT=9000 python3 server.py
+```
+
+## Endpoints
+
+- `GET /` — simpel placeholder-side
+- `GET /dashboard` — samme placeholder-side
+- `GET /health` — health-check, returnerer `ok`
+
+## Test
+
+```bash
+pytest
+```
