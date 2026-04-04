@@ -35,7 +35,7 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
   </head>
   <body>
     <h1>Home Monitor</h1>
-    <p>Webserver er klar. Dashboard-indhold kommer i næste trin.</p>
+    <p>Webserver er klar. Dashboard-indhold kommer i næste trin!</p>
   </body>
 </html>
 """
