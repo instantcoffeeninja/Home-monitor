@@ -3,10 +3,20 @@
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
+import time
 
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
+START_TIME_MONOTONIC = time.monotonic()
+
+
+def format_uptime(total_seconds: int) -> str:
+    """Formats uptime in HH:MM:SS."""
+
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
 class HomeMonitorHandler(BaseHTTPRequestHandler):
@@ -14,7 +24,8 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
         if self.path == "/health":
-            body = b"ok"
+            uptime_seconds = int(time.monotonic() - START_TIME_MONOTONIC)
+            body = f"OK\nUptime: {format_uptime(uptime_seconds)}".encode("utf-8")
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

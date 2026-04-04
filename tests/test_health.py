@@ -25,7 +25,9 @@ def test_health_returns_200_and_ok():
         with urlopen(f"http://127.0.0.1:{port}/health") as response:
             body = response.read().decode("utf-8")
             assert response.status == 200
-            assert body == "ok"
+            lines = body.splitlines()
+            assert lines[0] == "OK"
+            assert lines[1].startswith("Uptime: ")
     finally:
         server.shutdown()
         server.server_close()
