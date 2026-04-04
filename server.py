@@ -13,6 +13,15 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
     """Serves a simple placeholder dashboard page."""
 
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
+        if self.path == "/health":
+            body = b"ok"
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if self.path not in {"/", "/dashboard"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
             return
