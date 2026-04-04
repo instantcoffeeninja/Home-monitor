@@ -36,6 +36,7 @@ def test_dashboard_returns_200():
             body = response.read().decode("utf-8")
             assert response.status == 200
             assert "Dashboard-indhold kommer i næste trin" in body
+            assert "Sidste server-restart:" in body
     finally:
         server.shutdown()
         server.server_close()

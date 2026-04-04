@@ -2,6 +2,7 @@
 
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from datetime import datetime, timezone
 import os
 import time
 
@@ -9,6 +10,7 @@ import time
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
 START_TIME_MONOTONIC = time.monotonic()
+SERVER_RESTART_TIME = datetime.now(timezone.utc)
 
 
 def format_uptime(total_seconds: int) -> str:
@@ -17,6 +19,12 @@ def format_uptime(total_seconds: int) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+
+def format_restart_time(restart_time: datetime) -> str:
+    """Formats restart time in a human-friendly UTC timestamp."""
+
+    return restart_time.strftime("%d-%m-%Y %H:%M:%S UTC")
 
 
 class HomeMonitorHandler(BaseHTTPRequestHandler):
@@ -37,15 +45,40 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
             return
 
-        html = """<!doctype html>
+        restart_time = format_restart_time(SERVER_RESTART_TIME)
+        html = f"""<!doctype html>
 <html lang=\"da\">
   <head>
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>Home Monitor</title>
+    <style>
+      body {{
+        margin: 0;
+        padding: 24px;
+        font-family: Arial, sans-serif;
+      }}
+
+      .top-bar {{
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+      }}
+
+      .restart-time {{
+        margin: 0;
+        font-size: 14px;
+        color: #3d3d3d;
+        text-align: right;
+      }}
+    </style>
   </head>
   <body>
-    <h1>Home Monitor</h1>
+    <div class=\"top-bar\">
+      <h1>Home Monitor</h1>
+      <p class=\"restart-time\">Sidste server-restart: {restart_time}</p>
+    </div>
     <p>Webserver er klar. Dashboard-indhold kommer i næste trin!</p>
   </body>
 </html>
