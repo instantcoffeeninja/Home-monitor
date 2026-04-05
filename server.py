@@ -193,7 +193,95 @@ def _format_last_seen(last_seen: str) -> str:
     return parsed.strftime("%d-%m-%Y %H:%M:%S UTC")
 
 
-def render_hosts_table(rows: list[tuple[str, str, str]]) -> str:
+def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, str]]:
+    """Fetches host rows and assigns dashboard color status classes."""
+
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            scan_timestamps = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT scanned_at FROM nmap_results ORDER BY scanned_at DESC"
+                ).fetchall()
+            ]
+            if not scan_timestamps:
+                return []
+
+            host_rows = conn.execute(
+                """
+                SELECT latest.ip,
+                       COALESCE(
+                           (
+                               SELECT nr.hostname
+                               FROM nmap_results nr
+                               WHERE nr.ip = latest.ip
+                                 AND NULLIF(TRIM(COALESCE(nr.hostname, '')), '') IS NOT NULL
+                               ORDER BY nr.scanned_at DESC, nr.id DESC
+                               LIMIT 1
+                           ),
+                           ''
+                       ) AS hostname,
+                       latest.last_seen,
+                       first_seen.first_seen
+                FROM (
+                    SELECT ip, MAX(scanned_at) AS last_seen
+                    FROM nmap_results
+                    GROUP BY ip
+                ) AS latest
+                JOIN (
+                    SELECT ip, MIN(scanned_at) AS first_seen
+                    FROM nmap_results
+                    GROUP BY ip
+                ) AS first_seen ON first_seen.ip = latest.ip
+                ORDER BY latest.ip ASC
+                """
+            ).fetchall()
+
+            presence_rows = conn.execute(
+                """
+                SELECT ip, scanned_at
+                FROM nmap_results
+                GROUP BY ip, scanned_at
+                """
+            ).fetchall()
+
+    scans_by_ip: dict[str, set[str]] = {}
+    for ip, scanned_at in presence_rows:
+        scans_by_ip.setdefault(ip, set()).add(scanned_at)
+
+    classified_rows: list[tuple[str, str, str, str]] = []
+    latest_scan = scan_timestamps[0]
+
+    for ip, hostname, last_seen, first_seen in host_rows:
+        scans_for_ip = scans_by_ip.get(ip, set())
+        status_class = ""
+
+        if first_seen == latest_scan:
+            status_class = "status-new"
+        elif latest_scan not in scans_for_ip:
+            offline_streak = 0
+            for scan_ts in scan_timestamps:
+                if scan_ts in scans_for_ip:
+                    break
+                offline_streak += 1
+            status_class = "status-offline-long" if offline_streak > 3 else "status-offline"
+        else:
+            online_streak = 0
+            for scan_ts in scan_timestamps:
+                if scan_ts not in scans_for_ip:
+                    break
+                online_streak += 1
+            if online_streak > 3:
+                status_class = "status-online-long"
+
+        classified_rows.append((ip, hostname, last_seen, status_class))
+
+    return classified_rows
+
+
+def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
     """Builds HTML table for hosts list."""
 
     if not rows:
@@ -202,12 +290,12 @@ def render_hosts_table(rows: list[tuple[str, str, str]]) -> str:
     body_rows = "\n".join(
         (
             "<tr>"
-            f"<td>{escape(ip)}</td>"
-            f"<td>{escape(hostname or '-')}</td>"
-            f"<td>{_format_last_seen(last_seen)}</td>"
+            f"<td class=\"{status_class}\">{escape(ip)}</td>"
+            f"<td class=\"{status_class}\">{escape(hostname or '-')}</td>"
+            f"<td class=\"{status_class}\">{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
-        for ip, hostname, last_seen in rows
+        for ip, hostname, last_seen, status_class in rows
     )
     return f"""
     <table>
@@ -240,7 +328,7 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
             return
 
         restart_time = format_restart_time(SERVER_RESTART_TIME)
-        rows = get_latest_scan_results()
+        rows = get_dashboard_rows()
         hosts_table = render_hosts_table(rows)
         html = f"""<!doctype html>
 <html lang=\"da\">
@@ -283,6 +371,22 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
       th {{
         background: #f5f5f5;
+      }}
+
+      .status-new {{
+        background: #f8caca;
+      }}
+
+      .status-offline {{
+        background: #fff4b8;
+      }}
+
+      .status-offline-long {{
+        background: #ffd8a8;
+      }}
+
+      .status-online-long {{
+        background: #d8f5c0;
       }}
     </style>
   </head>

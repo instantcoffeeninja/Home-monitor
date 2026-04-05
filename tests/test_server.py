@@ -2,6 +2,7 @@ import threading
 import time
 from urllib.request import urlopen
 from urllib.error import HTTPError
+import sqlite3
 
 from http.server import ThreadingHTTPServer
 import server
@@ -108,5 +109,45 @@ def test_dashboard_shows_hosts_last_seen_from_previous_scans(tmp_path):
         finally:
             server_instance.shutdown()
             server_instance.server_close()
+    finally:
+        server.DB_PATH = original_db_path
+
+
+def test_dashboard_status_color_classes(tmp_path):
+    db_path = tmp_path / "home_monitor_test_status.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
+                [
+                    ("2026-04-01T00:00:00+00:00", "192.168.0.10", "offline-long.local"),
+                    ("2026-04-02T00:00:00+00:00", "192.168.0.20", "online-long.local"),
+                    ("2026-04-03T00:00:00+00:00", "192.168.0.20", "online-long.local"),
+                    ("2026-04-04T00:00:00+00:00", "192.168.0.20", "online-long.local"),
+                    ("2026-04-04T00:00:00+00:00", "192.168.0.30", "offline-short.local"),
+                    ("2026-04-05T00:00:00+00:00", "192.168.0.20", "online-long.local"),
+                    ("2026-04-05T00:00:00+00:00", "192.168.0.40", "new.local"),
+                ],
+            )
+            conn.commit()
+
+        rows = server.get_dashboard_rows(server.DB_PATH)
+        status_by_ip = {ip: status for ip, _hostname, _last_seen, status in rows}
+
+        assert status_by_ip["192.168.0.10"] == "status-offline-long"
+        assert status_by_ip["192.168.0.20"] == "status-online-long"
+        assert status_by_ip["192.168.0.30"] == "status-offline"
+        assert status_by_ip["192.168.0.40"] == "status-new"
+
+        rendered_table = server.render_hosts_table(rows)
+        assert "class=\"status-offline-long\"" in rendered_table
+        assert "class=\"status-online-long\"" in rendered_table
+        assert "class=\"status-offline\"" in rendered_table
+        assert "class=\"status-new\"" in rendered_table
     finally:
         server.DB_PATH = original_db_path
