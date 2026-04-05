@@ -53,6 +53,12 @@ def init_db(db_path: str | None = None) -> None:
                 )
                 """
             )
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(nmap_results)").fetchall()
+            }
+            if "hostname" not in columns:
+                conn.execute("ALTER TABLE nmap_results ADD COLUMN hostname TEXT")
             conn.commit()
 
 
@@ -87,7 +93,7 @@ def parse_nmap_grepable(output: str) -> list[tuple[str, str]]:
 def run_nmap_scan(network_range: str = NETWORK_RANGE, nmap_bin: str = NMAP_BIN) -> list[tuple[str, str]]:
     """Runs nmap ping scan and returns active hosts."""
 
-    command = [nmap_bin, "-sn", network_range, "-oG", "-"]
+    command = [nmap_bin, "-sn", "-R", network_range, "-oG", "-"]
     result = subprocess.run(command, capture_output=True, text=True, check=True)
     return parse_nmap_grepable(result.stdout)
 
@@ -106,29 +112,42 @@ def save_scan_results(hosts: list[tuple[str, str]], db_path: str | None = None) 
             conn.commit()
 
 
-def get_latest_scan_results(db_path: str | None = None) -> list[tuple[str, str]]:
-    """Fetches the latest batch of scan rows."""
+def get_latest_scan_results(db_path: str | None = None) -> list[tuple[str, str, str]]:
+    """Fetches latest known hostname and last seen per IP."""
 
     target_db_path = db_path or DB_PATH
     init_db(target_db_path)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
-            row = conn.execute("SELECT MAX(scanned_at) FROM nmap_results").fetchone()
-            latest_scanned_at = row[0] if row else None
-            if not latest_scanned_at:
+            row = conn.execute("SELECT COUNT(*) FROM nmap_results").fetchone()
+            if not row or row[0] == 0:
                 return []
 
             rows = conn.execute(
                 """
-                SELECT ip, COALESCE(hostname, '')
-                FROM nmap_results
-                WHERE scanned_at = ?
+                SELECT latest.ip,
+                       COALESCE(
+                           (
+                               SELECT nr.hostname
+                               FROM nmap_results nr
+                               WHERE nr.ip = latest.ip
+                                 AND NULLIF(TRIM(COALESCE(nr.hostname, '')), '') IS NOT NULL
+                               ORDER BY nr.scanned_at DESC, nr.id DESC
+                               LIMIT 1
+                           ),
+                           ''
+                       ) AS hostname,
+                       latest.last_seen
+                FROM (
+                    SELECT ip, MAX(scanned_at) AS last_seen
+                    FROM nmap_results
+                    GROUP BY ip
+                ) AS latest
                 ORDER BY ip ASC
                 """,
-                (latest_scanned_at,),
             ).fetchall()
 
-    return [(ip, hostname) for ip, hostname in rows]
+    return [(ip, hostname, last_seen) for ip, hostname, last_seen in rows]
 
 
 def scan_and_store(
@@ -159,19 +178,41 @@ def scan_scheduler(stop_event: threading.Event, interval_seconds: int = SCAN_INT
         stop_event.wait(interval_seconds)
 
 
-def render_hosts_table(rows: list[tuple[str, str]]) -> str:
+def _format_last_seen(last_seen: str) -> str:
+    """Format ISO timestamp to dashboard-friendly UTC string."""
+
+    try:
+        parsed = datetime.fromisoformat(last_seen)
+    except ValueError:
+        return escape(last_seen)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.strftime("%d-%m-%Y %H:%M:%S UTC")
+
+
+def render_hosts_table(rows: list[tuple[str, str, str]]) -> str:
     """Builds HTML table for hosts list."""
 
     if not rows:
         return "<p>Ingen nmap-resultater endnu.</p>"
 
     body_rows = "\n".join(
-        f"<tr><td>{escape(ip)}</td><td>{escape(hostname or '-')}</td></tr>" for ip, hostname in rows
+        (
+            "<tr>"
+            f"<td>{escape(ip)}</td>"
+            f"<td>{escape(hostname or '-')}</td>"
+            f"<td>{_format_last_seen(last_seen)}</td>"
+            "</tr>"
+        )
+        for ip, hostname, last_seen in rows
     )
     return f"""
     <table>
       <thead>
-        <tr><th>IP</th><th>Hostname</th></tr>
+        <tr><th>IP</th><th>Hostname</th><th>Sidst fundet</th></tr>
       </thead>
       <tbody>
         {body_rows}
