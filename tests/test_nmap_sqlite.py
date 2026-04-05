@@ -22,6 +22,7 @@ Host: 192.168.0.12 (tv.local) Status: Up
     def fake_run(command, capture_output, text, check):
         assert command[0] == "nmap"
         assert "-sn" in command
+        assert "-R" in command
         return DummyCompletedProcess(stdout=nmap_output)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
