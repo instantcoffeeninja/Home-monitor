@@ -1,0 +1,81 @@
+name: Codex Auto-Fix on CI Failure
+
+on:
+  workflow_run:
+    workflows: ["PR Checks"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-fix:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      FAILED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      FAILED_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      FAILED_RUN_URL: ${{ github.event.workflow_run.html_url }}
+
+    steps:
+      - name: Check API key exists
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY is missing"
+            exit 1
+          fi
+
+      - name: Checkout failing ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FAILED_HEAD_SHA }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project and tools
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest ruff
+          npm install -g @openai/codex
+
+      - name: Run Codex to fix the failure
+        run: |
+          codex exec "
+          The CI workflow failed for this branch.
+          Fix only the concrete issue causing the failure.
+          Start by running:
+            ruff check .
+            pytest
+          Make the smallest safe change needed.
+          After editing, rerun:
+            ruff check .
+            pytest
+          Only stop when both commands pass.
+          CI run: $FAILED_RUN_URL
+          "
+
+      - name: Verify checks now pass
+        run: |
+          ruff check .
+          pytest
+
+      - name: Create pull request with fixes
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "fix(ci): auto-fix failing checks via Codex"
+          branch: codex/auto-fix-${{ github.event.workflow_run.id }}
+          base: ${{ env.FAILED_HEAD_BRANCH }}
+          title: "Auto-fix failing CI checks via Codex"
+          body: |
+            This PR was created automatically by Codex after CI failed.
+
+            Source run:
+            ${{ env.FAILED_RUN_URL }}
