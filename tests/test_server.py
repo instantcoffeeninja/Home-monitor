@@ -151,3 +151,45 @@ def test_dashboard_status_color_classes(tmp_path):
         assert "class=\"status-new\"" in rendered_table
     finally:
         server.DB_PATH = original_db_path
+
+
+def test_hostname_history_links_and_page_content(tmp_path):
+    db_path = tmp_path / "home_monitor_test_hostname_history.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
+                [
+                    ("2026-04-04T10:00:00+00:00", "192.168.0.50", "laptop.local"),
+                    ("2026-04-05T10:00:00+00:00", "192.168.0.50", "laptop.local"),
+                    ("2026-04-05T10:00:00+00:00", "192.168.0.60", "phone.local"),
+                ],
+            )
+            conn.commit()
+
+        server_instance, port = start_test_server()
+        try:
+            time.sleep(0.1)
+            with urlopen(f"http://127.0.0.1:{port}/dashboard") as response:
+                body = response.read().decode("utf-8")
+                assert response.status == 200
+                assert '/history?hostname=laptop.local' in body
+                assert '/history?hostname=phone.local' in body
+
+            with urlopen(f"http://127.0.0.1:{port}/history?hostname=laptop.local") as response:
+                history_body = response.read().decode("utf-8")
+                assert response.status == 200
+                assert "Historik for hostname: laptop.local" in history_body
+                assert "192.168.0.50" in history_body
+                assert "laptop.local" in history_body
+                assert "Luk historik og gå tilbage" in history_body
+                assert "phone.local" not in history_body
+        finally:
+            server_instance.shutdown()
+            server_instance.server_close()
+    finally:
+        server.DB_PATH = original_db_path

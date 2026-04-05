@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from urllib.parse import parse_qs, quote_plus, urlparse
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
@@ -291,7 +292,7 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
         (
             "<tr>"
             f"<td class=\"{status_class}\">{escape(ip)}</td>"
-            f"<td class=\"{status_class}\">{escape(hostname or '-')}</td>"
+            f"<td class=\"{status_class}\">{_render_hostname_cell(hostname)}</td>"
             f"<td class=\"{status_class}\">{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
@@ -309,11 +310,80 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
     """
 
 
+def _render_hostname_cell(hostname: str) -> str:
+    """Renders hostname as history link when present."""
+
+    clean_hostname = (hostname or "").strip()
+    if not clean_hostname:
+        return "-"
+
+    encoded_hostname = quote_plus(clean_hostname)
+    return (
+        f"<a href=\"/history?hostname={encoded_hostname}\" "
+        f"title=\"Vis historik for {escape(clean_hostname)}\">{escape(clean_hostname)}</a>"
+    )
+
+
+def get_hostname_history(hostname: str, db_path: str | None = None) -> list[tuple[str, str, str]]:
+    """Returns all saved rows for a specific hostname."""
+
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT scanned_at, ip, hostname
+                FROM nmap_results
+                WHERE hostname = ?
+                ORDER BY scanned_at DESC, id DESC
+                """,
+                (hostname,),
+            ).fetchall()
+
+    return [(scanned_at, ip, row_hostname or "") for scanned_at, ip, row_hostname in rows]
+
+
+def render_hostname_history_table(hostname: str, rows: list[tuple[str, str, str]]) -> str:
+    """Builds HTML table with historical records for one hostname."""
+
+    escaped_hostname = escape(hostname)
+    if not rows:
+        return f"<p>Ingen historik fundet for hostname: <strong>{escaped_hostname}</strong>.</p>"
+
+    body_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{_format_last_seen(scanned_at)}</td>"
+            f"<td>{escape(ip)}</td>"
+            f"<td>{escape(row_hostname or '-')}</td>"
+            "</tr>"
+        )
+        for scanned_at, ip, row_hostname in rows
+    )
+    return f"""
+    <h2>Historik for hostname: {escaped_hostname}</h2>
+    <p><a href="/dashboard">Luk historik og gå tilbage</a></p>
+    <table>
+      <thead>
+        <tr><th>Scannet</th><th>IP</th><th>Hostname</th></tr>
+      </thead>
+      <tbody>
+        {body_rows}
+      </tbody>
+    </table>
+    """
+
+
 class HomeMonitorHandler(BaseHTTPRequestHandler):
     """Serves Home Monitor dashboard page."""
 
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
-        if self.path == "/health":
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        query_params = parse_qs(parsed_path.query)
+
+        if path == "/health":
             uptime_seconds = int(time.monotonic() - START_TIME_MONOTONIC)
             body = f"OK\nUptime: {format_uptime(uptime_seconds)}".encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -323,7 +393,60 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if self.path not in {"/", "/dashboard"}:
+        if path == "/history":
+            hostname_values = query_params.get("hostname", [])
+            selected_hostname = hostname_values[0].strip() if hostname_values else ""
+            if not selected_hostname:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Hostname query parameter is required")
+                return
+
+            history_rows = get_hostname_history(selected_hostname)
+            history_table = render_hostname_history_table(selected_hostname, history_rows)
+            html = f"""<!doctype html>
+<html lang=\"da\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>Home Monitor - Hostname historik</title>
+    <style>
+      body {{
+        margin: 0;
+        padding: 24px;
+        font-family: Arial, sans-serif;
+      }}
+
+      table {{
+        border-collapse: collapse;
+        margin-top: 16px;
+        min-width: 450px;
+      }}
+
+      th, td {{
+        border: 1px solid #d0d0d0;
+        padding: 8px 10px;
+        text-align: left;
+      }}
+
+      th {{
+        background: #f5f5f5;
+      }}
+    </style>
+  </head>
+  <body>
+    <h1>Home Monitor</h1>
+    {history_table}
+  </body>
+</html>
+"""
+            body = html.encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if path not in {"/", "/dashboard"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
             return
 
