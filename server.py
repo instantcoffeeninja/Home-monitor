@@ -10,7 +10,6 @@ import subprocess
 import threading
 import time
 
-
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
 START_TIME_MONOTONIC = time.monotonic()
