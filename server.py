@@ -9,7 +9,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-import math
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
