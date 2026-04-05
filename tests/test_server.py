@@ -39,6 +39,8 @@ def test_dashboard_returns_200():
             assert response.status == 200
             assert "Sidste server-restart:" in body
             assert "Aktive enheder (192.168.0.x)" in body
+            assert "Farveforklaring" in body
+            assert "class=\"dashboard-content\"" in body
             assert ("IP" in body and "Hostname" in body and "Sidst fundet" in body) or "Ingen nmap-resultater endnu." in body
     finally:
         server_instance.shutdown()
@@ -145,10 +147,14 @@ def test_dashboard_status_color_classes(tmp_path):
         assert status_by_ip["192.168.0.40"] == "status-new"
 
         rendered_table = server.render_hosts_table(rows)
+        rendered_legend = server.render_status_legend()
         assert "class=\"status-offline-long\"" in rendered_table
         assert "class=\"status-online-long\"" in rendered_table
         assert "class=\"status-offline\"" in rendered_table
         assert "class=\"status-new\"" in rendered_table
+        assert "Farveforklaring" in rendered_legend
+        assert "Offline længe" in rendered_legend
+        assert "Stabil online" in rendered_legend
     finally:
         server.DB_PATH = original_db_path
 
