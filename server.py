@@ -310,6 +310,34 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
     """
 
 
+def render_status_legend() -> str:
+    """Builds legend that explains dashboard status colors."""
+
+    legend_items = [
+        ("status-new", "Ny enhed", "Set første gang i seneste scanning."),
+        ("status-offline", "Offline", "Ikke set i seneste scanning."),
+        ("status-offline-long", "Offline længe", "Ikke set i mere end 3 scanninger."),
+        ("status-online-long", "Stabil online", "Set i mere end 3 scanninger i træk."),
+    ]
+    legend_rows = "\n".join(
+        (
+            "<li>"
+            f"<span class=\"legend-swatch {status_class}\" aria-hidden=\"true\"></span>"
+            f"<span><strong>{label}:</strong> {description}</span>"
+            "</li>"
+        )
+        for status_class, label, description in legend_items
+    )
+    return f"""
+    <aside class="status-legend" aria-label="Farveforklaring for status">
+      <h3>Farveforklaring</h3>
+      <ul>
+        {legend_rows}
+      </ul>
+    </aside>
+    """
+
+
 def _render_hostname_cell(hostname: str) -> str:
     """Renders hostname as history link when present."""
 
@@ -453,6 +481,7 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         restart_time = format_restart_time(SERVER_RESTART_TIME)
         rows = get_dashboard_rows()
         hosts_table = render_hosts_table(rows)
+        status_legend = render_status_legend()
         html = f"""<!doctype html>
 <html lang=\"da\">
   <head>
@@ -482,7 +511,6 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
       table {{
         border-collapse: collapse;
-        margin-top: 16px;
         min-width: 380px;
       }}
 
@@ -511,6 +539,52 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
       .status-online-long {{
         background: #d8f5c0;
       }}
+
+      .dashboard-content {{
+        margin-top: 16px;
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+      }}
+
+      .status-legend {{
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        padding: 12px;
+        min-width: 280px;
+        background: #fafafa;
+      }}
+
+      .status-legend h3 {{
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }}
+
+      .status-legend ul {{
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }}
+
+      .status-legend li {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }}
+
+      .status-legend li + li {{
+        margin-top: 8px;
+      }}
+
+      .legend-swatch {{
+        width: 14px;
+        height: 14px;
+        border: 1px solid #bdbdbd;
+        border-radius: 3px;
+        display: inline-block;
+        flex: 0 0 14px;
+      }}
     </style>
   </head>
   <body>
@@ -519,7 +593,10 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
       <p class=\"restart-time\">Sidste server-restart: {restart_time}</p>
     </div>
     <h2>Aktive enheder (192.168.0.x)</h2>
-    {hosts_table}
+    <div class="dashboard-content">
+      {hosts_table}
+      {status_legend}
+    </div>
   </body>
 </html>
 """
