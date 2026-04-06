@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import sqlite3
+from datetime import datetime, timezone
 
 from http.server import ThreadingHTTPServer
 import server
@@ -251,3 +252,17 @@ def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
         assert device_row == ("Min Laptop", "AA:AA:AA:AA:AA:AA")
     finally:
         server.DB_PATH = original_db_path
+
+
+def test_format_last_seen_human_readable_time():
+    now = datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert (
+        server._format_last_seen("2026-04-06T11:59:30+00:00", now=now) == "online now"
+    )
+    assert (
+        server._format_last_seen("2026-04-06T11:55:00+00:00", now=now) == "5 minutes ago"
+    )
+    assert (
+        server._format_last_seen("2026-04-06T09:00:00+00:00", now=now) == "3 hours ago"
+    )

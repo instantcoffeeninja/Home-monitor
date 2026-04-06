@@ -210,8 +210,8 @@ def scan_scheduler(stop_event: threading.Event, interval_seconds: int = SCAN_INT
         stop_event.wait(interval_seconds)
 
 
-def _format_last_seen(last_seen: str) -> str:
-    """Format ISO timestamp to dashboard-friendly UTC string."""
+def _format_last_seen(last_seen: str, now: datetime | None = None) -> str:
+    """Format ISO timestamp as relative, human-readable last seen time."""
 
     try:
         parsed = datetime.fromisoformat(last_seen)
@@ -222,7 +222,25 @@ def _format_last_seen(last_seen: str) -> str:
         parsed = parsed.replace(tzinfo=timezone.utc)
     else:
         parsed = parsed.astimezone(timezone.utc)
-    return parsed.strftime("%d-%m-%Y %H:%M:%S UTC")
+
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    else:
+        current_time = current_time.astimezone(timezone.utc)
+
+    seconds_since_seen = max(0, int((current_time - parsed).total_seconds()))
+    if seconds_since_seen < 60:
+        return "online now"
+
+    minutes_since_seen = seconds_since_seen // 60
+    if minutes_since_seen < 60:
+        unit = "minute" if minutes_since_seen == 1 else "minutes"
+        return f"{minutes_since_seen} {unit} ago"
+
+    hours_since_seen = minutes_since_seen // 60
+    unit = "hour" if hours_since_seen == 1 else "hours"
+    return f"{hours_since_seen} {unit} ago"
 
 
 def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, str]]:
