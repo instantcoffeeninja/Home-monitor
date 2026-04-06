@@ -1,6 +1,7 @@
 import threading
 import time
-from urllib.request import urlopen
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import sqlite3
 
@@ -69,7 +70,7 @@ def test_dashboard_shows_saved_hosts(tmp_path):
     try:
         server.init_db(server.DB_PATH)
         server.save_scan_results(
-            [("192.168.0.10", "printer"), ("192.168.0.20", "")],
+            [("192.168.0.10", "printer", ""), ("192.168.0.20", "", "")],
             db_path=server.DB_PATH,
         )
 
@@ -96,8 +97,8 @@ def test_dashboard_shows_hosts_last_seen_from_previous_scans(tmp_path):
 
     try:
         server.init_db(server.DB_PATH)
-        server.save_scan_results([("192.168.0.30", "nas.local")], db_path=server.DB_PATH)
-        server.save_scan_results([("192.168.0.40", "tv.local")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.30", "nas.local", "")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.40", "tv.local", "")], db_path=server.DB_PATH)
 
         server_instance, port = start_test_server()
         try:
@@ -168,11 +169,18 @@ def test_hostname_history_links_and_page_content(tmp_path):
         server.init_db(server.DB_PATH)
         with sqlite3.connect(server.DB_PATH) as conn:
             conn.executemany(
-                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
+                "INSERT INTO nmap_results (scanned_at, ip, hostname, mac_address) VALUES (?, ?, ?, ?)",
                 [
-                    ("2026-04-04T10:00:00+00:00", "192.168.0.50", "laptop.local"),
-                    ("2026-04-05T10:00:00+00:00", "192.168.0.50", "laptop.local"),
-                    ("2026-04-05T10:00:00+00:00", "192.168.0.60", "phone.local"),
+                    ("2026-04-04T10:00:00+00:00", "192.168.0.50", "laptop.local", "11:22:33:44:55:66"),
+                    ("2026-04-05T10:00:00+00:00", "192.168.0.50", "laptop.local", "11:22:33:44:55:66"),
+                    ("2026-04-05T10:00:00+00:00", "192.168.0.60", "phone.local", ""),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO devices (ip, hostname, mac_address) VALUES (?, ?, ?)",
+                [
+                    ("192.168.0.50", "laptop.local", "11:22:33:44:55:66"),
+                    ("192.168.0.60", "phone.local", None),
                 ],
             )
             conn.commit()
@@ -183,19 +191,63 @@ def test_hostname_history_links_and_page_content(tmp_path):
             with urlopen(f"http://127.0.0.1:{port}/dashboard") as response:
                 body = response.read().decode("utf-8")
                 assert response.status == 200
-                assert '/history?hostname=laptop.local' in body
-                assert '/history?hostname=phone.local' in body
+                assert '/history?ip=192.168.0.50' in body
+                assert '/history?ip=192.168.0.60' in body
 
-            with urlopen(f"http://127.0.0.1:{port}/history?hostname=laptop.local") as response:
+            with urlopen(f"http://127.0.0.1:{port}/history?ip=192.168.0.50") as response:
                 history_body = response.read().decode("utf-8")
                 assert response.status == 200
-                assert "Historik for hostname: laptop.local" in history_body
+                assert "Historik for IP: 192.168.0.50" in history_body
                 assert "192.168.0.50" in history_body
                 assert "laptop.local" in history_body
+                assert "11:22:33:44:55:66" in history_body
+                assert "Gem hostname" in history_body
                 assert "Luk historik og gå tilbage" in history_body
                 assert "phone.local" not in history_body
         finally:
             server_instance.shutdown()
             server_instance.server_close()
+    finally:
+        server.DB_PATH = original_db_path
+
+
+def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
+    db_path = tmp_path / "home_monitor_test_update_hostname.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        server.save_scan_results([("192.168.0.70", "", "AA:AA:AA:AA:AA:AA")], db_path=server.DB_PATH)
+
+        rows = server.get_dashboard_rows(server.DB_PATH)
+        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status in rows}
+        assert hostname_by_ip["192.168.0.70"] == "192.168.0.70"
+
+        server_instance, port = start_test_server()
+        try:
+            time.sleep(0.1)
+            payload = urlencode({"ip": "192.168.0.70", "hostname": "Min Laptop"}).encode("utf-8")
+            request = Request(
+                f"http://127.0.0.1:{port}/history/update",
+                method="POST",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            with urlopen(request) as response:
+                assert response.status == 200
+                redirected_body = response.read().decode("utf-8")
+                assert "Historik for IP: 192.168.0.70" in redirected_body
+                assert "Min Laptop" in redirected_body
+        finally:
+            server_instance.shutdown()
+            server_instance.server_close()
+
+        with sqlite3.connect(server.DB_PATH) as conn:
+            device_row = conn.execute(
+                "SELECT hostname, mac_address FROM devices WHERE ip = ?",
+                ("192.168.0.70",),
+            ).fetchone()
+        assert device_row == ("Min Laptop", "AA:AA:AA:AA:AA:AA")
     finally:
         server.DB_PATH = original_db_path
