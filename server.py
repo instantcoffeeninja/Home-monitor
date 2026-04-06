@@ -50,7 +50,17 @@ def init_db(db_path: str | None = None) -> None:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     scanned_at TEXT NOT NULL,
                     ip TEXT NOT NULL,
-                    hostname TEXT
+                    hostname TEXT,
+                    mac_address TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS devices (
+                    ip TEXT PRIMARY KEY,
+                    hostname TEXT NOT NULL,
+                    mac_address TEXT
                 )
                 """
             )
@@ -60,13 +70,15 @@ def init_db(db_path: str | None = None) -> None:
             }
             if "hostname" not in columns:
                 conn.execute("ALTER TABLE nmap_results ADD COLUMN hostname TEXT")
+            if "mac_address" not in columns:
+                conn.execute("ALTER TABLE nmap_results ADD COLUMN mac_address TEXT")
             conn.commit()
 
 
-def parse_nmap_grepable(output: str) -> list[tuple[str, str]]:
-    """Parses nmap -oG output and returns active hosts as (ip, hostname)."""
+def parse_nmap_grepable(output: str) -> list[tuple[str, str, str]]:
+    """Parses nmap -oG output and returns active hosts as (ip, hostname, mac)."""
 
-    hosts: list[tuple[str, str]] = []
+    hosts: list[tuple[str, str, str]] = []
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line.startswith("Host:") or "Status: Up" not in line:
@@ -85,13 +97,23 @@ def parse_nmap_grepable(output: str) -> list[tuple[str, str]]:
         except (IndexError, ValueError):
             continue
 
+        mac_address = ""
+        if "MAC Address:" in line:
+            try:
+                mac_part = line.split("MAC Address:", 1)[1].strip()
+                mac_address = mac_part.split()[0]
+            except IndexError:
+                mac_address = ""
+
         if ip:
-            hosts.append((ip, hostname))
+            hosts.append((ip, hostname, mac_address))
 
     return hosts
 
 
-def run_nmap_scan(network_range: str = NETWORK_RANGE, nmap_bin: str = NMAP_BIN) -> list[tuple[str, str]]:
+def run_nmap_scan(
+    network_range: str = NETWORK_RANGE, nmap_bin: str = NMAP_BIN
+) -> list[tuple[str, str, str]]:
     """Runs nmap ping scan and returns active hosts."""
 
     command = [nmap_bin, "-sn", "-R", network_range, "-oG", "-"]
@@ -99,17 +121,35 @@ def run_nmap_scan(network_range: str = NETWORK_RANGE, nmap_bin: str = NMAP_BIN) 
     return parse_nmap_grepable(result.stdout)
 
 
-def save_scan_results(hosts: list[tuple[str, str]], db_path: str | None = None) -> None:
+def _normalize_hostname(hostname: str, ip: str) -> str:
+    """Normalizes hostname; defaults to IP when hostname is blank."""
+
+    clean_hostname = (hostname or "").strip()
+    return clean_hostname if clean_hostname else ip
+
+
+def save_scan_results(hosts: list[tuple[str, str, str]], db_path: str | None = None) -> None:
     """Saves a scan result batch to sqlite."""
 
     target_db_path = db_path or DB_PATH
     scanned_at = datetime.now(timezone.utc).isoformat()
+    init_db(target_db_path)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
             conn.executemany(
-                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
-                [(scanned_at, ip, hostname) for ip, hostname in hosts],
+                "INSERT INTO nmap_results (scanned_at, ip, hostname, mac_address) VALUES (?, ?, ?, ?)",
+                [(scanned_at, ip, hostname, mac_address) for ip, hostname, mac_address in hosts],
             )
+            for ip, hostname, mac_address in hosts:
+                conn.execute(
+                    """
+                    INSERT INTO devices (ip, hostname, mac_address)
+                    VALUES (?, ?, NULLIF(?, ''))
+                    ON CONFLICT(ip) DO UPDATE SET
+                      mac_address = COALESCE(NULLIF(excluded.mac_address, ''), devices.mac_address)
+                    """,
+                    (ip, _normalize_hostname(hostname, ip), mac_address),
+                )
             conn.commit()
 
 
@@ -127,23 +167,14 @@ def get_latest_scan_results(db_path: str | None = None) -> list[tuple[str, str, 
             rows = conn.execute(
                 """
                 SELECT latest.ip,
-                       COALESCE(
-                           (
-                               SELECT nr.hostname
-                               FROM nmap_results nr
-                               WHERE nr.ip = latest.ip
-                                 AND NULLIF(TRIM(COALESCE(nr.hostname, '')), '') IS NOT NULL
-                               ORDER BY nr.scanned_at DESC, nr.id DESC
-                               LIMIT 1
-                           ),
-                           ''
-                       ) AS hostname,
+                       COALESCE(d.hostname, latest.ip) AS hostname,
                        latest.last_seen
                 FROM (
                     SELECT ip, MAX(scanned_at) AS last_seen
                     FROM nmap_results
                     GROUP BY ip
                 ) AS latest
+                LEFT JOIN devices d ON d.ip = latest.ip
                 ORDER BY ip ASC
                 """,
             ).fetchall()
@@ -155,7 +186,7 @@ def scan_and_store(
     db_path: str | None = None,
     network_range: str = NETWORK_RANGE,
     nmap_bin: str = NMAP_BIN,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, str]]:
     """Runs scan and persists the results."""
 
     hosts = run_nmap_scan(network_range=network_range, nmap_bin=nmap_bin)
@@ -213,17 +244,7 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
             host_rows = conn.execute(
                 """
                 SELECT latest.ip,
-                       COALESCE(
-                           (
-                               SELECT nr.hostname
-                               FROM nmap_results nr
-                               WHERE nr.ip = latest.ip
-                                 AND NULLIF(TRIM(COALESCE(nr.hostname, '')), '') IS NOT NULL
-                               ORDER BY nr.scanned_at DESC, nr.id DESC
-                               LIMIT 1
-                           ),
-                           ''
-                       ) AS hostname,
+                       COALESCE(d.hostname, latest.ip) AS hostname,
                        latest.last_seen,
                        first_seen.first_seen
                 FROM (
@@ -236,6 +257,7 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
                     FROM nmap_results
                     GROUP BY ip
                 ) AS first_seen ON first_seen.ip = latest.ip
+                LEFT JOIN devices d ON d.ip = latest.ip
                 ORDER BY latest.ip ASC
                 """
             ).fetchall()
@@ -292,7 +314,7 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
         (
             "<tr>"
             f"<td class=\"{status_class}\">{escape(ip)}</td>"
-            f"<td class=\"{status_class}\">{_render_hostname_cell(hostname)}</td>"
+            f"<td class=\"{status_class}\">{_render_hostname_cell(hostname, ip)}</td>"
             f"<td class=\"{status_class}\">{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
@@ -338,22 +360,20 @@ def render_status_legend() -> str:
     """
 
 
-def _render_hostname_cell(hostname: str) -> str:
+def _render_hostname_cell(hostname: str, ip: str) -> str:
     """Renders hostname as history link when present."""
 
-    clean_hostname = (hostname or "").strip()
-    if not clean_hostname:
-        return "-"
+    clean_hostname = _normalize_hostname(hostname, ip)
 
-    encoded_hostname = quote_plus(clean_hostname)
+    encoded_ip = quote_plus(ip)
     return (
-        f"<a href=\"/history?hostname={encoded_hostname}\" "
+        f"<a href=\"/history?ip={encoded_ip}\" "
         f"title=\"Vis historik for {escape(clean_hostname)}\">{escape(clean_hostname)}</a>"
     )
 
 
-def get_hostname_history(hostname: str, db_path: str | None = None) -> list[tuple[str, str, str]]:
-    """Returns all saved rows for a specific hostname."""
+def get_ip_history(ip: str, db_path: str | None = None) -> list[tuple[str, str, str, str]]:
+    """Returns all saved rows for a specific IP."""
 
     target_db_path = db_path or DB_PATH
     init_db(target_db_path)
@@ -361,40 +381,85 @@ def get_hostname_history(hostname: str, db_path: str | None = None) -> list[tupl
         with sqlite3.connect(target_db_path) as conn:
             rows = conn.execute(
                 """
-                SELECT scanned_at, ip, hostname
+                SELECT scanned_at, ip, hostname, COALESCE(mac_address, '')
                 FROM nmap_results
-                WHERE hostname = ?
+                WHERE ip = ?
                 ORDER BY scanned_at DESC, id DESC
                 """,
-                (hostname,),
+                (ip,),
             ).fetchall()
 
-    return [(scanned_at, ip, row_hostname or "") for scanned_at, ip, row_hostname in rows]
+    return [(scanned_at, row_ip, row_hostname or "", row_mac or "") for scanned_at, row_ip, row_hostname, row_mac in rows]
 
 
-def render_hostname_history_table(hostname: str, rows: list[tuple[str, str, str]]) -> str:
-    """Builds HTML table with historical records for one hostname."""
+def get_saved_hostname(ip: str, db_path: str | None = None) -> str:
+    """Returns editable hostname from devices table for one IP."""
 
-    escaped_hostname = escape(hostname)
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            row = conn.execute(
+                "SELECT hostname FROM devices WHERE ip = ? LIMIT 1",
+                (ip,),
+            ).fetchone()
+
+    if not row:
+        return ip
+    return _normalize_hostname(row[0], ip)
+
+
+def update_saved_hostname(ip: str, hostname: str, db_path: str | None = None) -> str:
+    """Updates editable hostname for IP and returns normalized hostname."""
+
+    target_db_path = db_path or DB_PATH
+    normalized_hostname = _normalize_hostname(hostname, ip)
+    init_db(target_db_path)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO devices (ip, hostname, mac_address)
+                VALUES (?, ?, NULL)
+                ON CONFLICT(ip) DO UPDATE SET hostname = excluded.hostname
+                """,
+                (ip, normalized_hostname),
+            )
+            conn.commit()
+    return normalized_hostname
+
+
+def render_hostname_history_table(ip: str, saved_hostname: str, rows: list[tuple[str, str, str, str]]) -> str:
+    """Builds HTML table with historical records for one IP."""
+
+    escaped_ip = escape(ip)
+    escaped_saved_hostname = escape(saved_hostname)
     if not rows:
-        return f"<p>Ingen historik fundet for hostname: <strong>{escaped_hostname}</strong>.</p>"
+        return f"<p>Ingen historik fundet for IP: <strong>{escaped_ip}</strong>.</p>"
 
     body_rows = "\n".join(
         (
             "<tr>"
             f"<td>{_format_last_seen(scanned_at)}</td>"
             f"<td>{escape(ip)}</td>"
-            f"<td>{escape(row_hostname or '-')}</td>"
+            f"<td>{escape(_normalize_hostname(row_hostname, ip))}</td>"
+            f"<td>{escape(row_mac or '-')}</td>"
             "</tr>"
         )
-        for scanned_at, ip, row_hostname in rows
+        for scanned_at, ip, row_hostname, row_mac in rows
     )
     return f"""
-    <h2>Historik for hostname: {escaped_hostname}</h2>
+    <h2>Historik for IP: {escaped_ip}</h2>
+    <form method="post" action="/history/update">
+      <input type="hidden" name="ip" value="{escaped_ip}" />
+      <label for="hostname"><strong>Hostname (redigerbar):</strong></label>
+      <input id="hostname" name="hostname" value="{escaped_saved_hostname}" />
+      <button type="submit">Gem hostname</button>
+    </form>
     <p><a href="/dashboard">Luk historik og gå tilbage</a></p>
     <table>
       <thead>
-        <tr><th>Scannet</th><th>IP</th><th>Hostname</th></tr>
+        <tr><th>Scannet</th><th>IP</th><th>Hostname (scan)</th><th>MAC adresse</th></tr>
       </thead>
       <tbody>
         {body_rows}
@@ -405,6 +470,27 @@ def render_hostname_history_table(hostname: str, rows: list[tuple[str, str, str]
 
 class HomeMonitorHandler(BaseHTTPRequestHandler):
     """Serves Home Monitor dashboard page."""
+
+    def do_POST(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
+        parsed_path = urlparse(self.path)
+        if parsed_path.path != "/history/update":
+            self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
+            return
+
+        content_length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(content_length).decode("utf-8")
+        form_data = parse_qs(raw_body)
+
+        ip = form_data.get("ip", [""])[0].strip()
+        hostname = form_data.get("hostname", [""])[0]
+        if not ip:
+            self.send_error(HTTPStatus.BAD_REQUEST, "IP field is required")
+            return
+
+        update_saved_hostname(ip, hostname)
+        self.send_response(HTTPStatus.SEE_OTHER)
+        self.send_header("Location", f"/history?ip={quote_plus(ip)}")
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
         parsed_path = urlparse(self.path)
@@ -422,14 +508,15 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/history":
-            hostname_values = query_params.get("hostname", [])
-            selected_hostname = hostname_values[0].strip() if hostname_values else ""
-            if not selected_hostname:
-                self.send_error(HTTPStatus.BAD_REQUEST, "Hostname query parameter is required")
+            ip_values = query_params.get("ip", [])
+            selected_ip = ip_values[0].strip() if ip_values else ""
+            if not selected_ip:
+                self.send_error(HTTPStatus.BAD_REQUEST, "IP query parameter is required")
                 return
 
-            history_rows = get_hostname_history(selected_hostname)
-            history_table = render_hostname_history_table(selected_hostname, history_rows)
+            history_rows = get_ip_history(selected_ip)
+            saved_hostname = get_saved_hostname(selected_ip)
+            history_table = render_hostname_history_table(selected_ip, saved_hostname, history_rows)
             html = f"""<!doctype html>
 <html lang=\"da\">
   <head>
