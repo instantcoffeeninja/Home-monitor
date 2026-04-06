@@ -491,6 +491,13 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
         parsed_path = urlparse(self.path)
+        if parsed_path.path == "/dashboard/scan":
+            scan_and_store()
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/dashboard")
+            self.end_headers()
+            return
+
         if parsed_path.path != "/history/update":
             self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
             return
@@ -697,6 +704,9 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
       <h1>Home Monitor</h1>
       <p class=\"restart-time\">Sidste server-restart: {restart_time}</p>
     </div>
+    <form method="post" action="/dashboard/scan">
+      <button type="submit">Scan network</button>
+    </form>
     <h2>Aktive enheder (192.168.0.x)</h2>
     <div class="dashboard-content">
       {hosts_table}
