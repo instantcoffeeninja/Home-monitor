@@ -301,7 +301,7 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
     return f"""
     <table>
       <thead>
-        <tr><th>IP</th><th>Hostname</th><th>Sidst fundet</th></tr>
+        <tr><th>IP</th><th>Hostname</th><th>Last found</th></tr>
       </thead>
       <tbody>
         {body_rows}
