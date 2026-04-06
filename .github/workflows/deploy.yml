@@ -1,14 +1,20 @@
 name: Deploy
-run-name: Deploy merged PR #${{ github.event.pull_request.number }} to Pi
 
 on:
+  push:
+    branches: [ main ]
   pull_request:
     types: [closed]
     branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-home-monitor
+  cancel-in-progress: false
 
 jobs:
   deploy:
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -24,9 +30,7 @@ jobs:
 
             echo "=== DEPLOY START ==="
             date
-            echo "PR #${{ github.event.pull_request.number }} merged into main"
-            echo "Merge commit: ${{ github.event.pull_request.merge_commit_sha }}"
-            echo "PR title: ${{ github.event.pull_request.title }}"
+            echo "Event: ${{ github.event_name }}"
 
             echo "=== CURRENT DIRECTORY ==="
             pwd
