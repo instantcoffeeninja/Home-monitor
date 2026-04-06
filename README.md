@@ -7,7 +7,7 @@ Minimal Python-webserver som dashboard over aktive enheder på hjemmenetværket.
 - Kører `nmap -sn` mod netværket `192.168.0.0/24` (kan ændres via miljøvariabler)
 - Gemmer scanningsresultater i SQLite (`home_monitor.db`)
 - Scanner automatisk én gang i timen
-- Viser seneste nmap-resultat på dashboard med kolonnerne IP og Hostname
+- Viser seneste nmap-resultat på dashboard med kolonnerne IP, Hostname og Sidst fundet
 
 ## Krav
 
