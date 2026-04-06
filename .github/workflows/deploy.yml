@@ -16,8 +16,22 @@ jobs:
           username: ${{ secrets.PI_USER }}
           key: ${{ secrets.PI_SSH_KEY }}
           script: |
+            set -e
             cd /home/pi/Home-monitor
+            echo "=== PWD ==="
+            pwd
+            echo "=== BRANCH ==="
+            git branch --show-current
+            echo "=== STATUS BEFORE PULL ==="
+            git status --short
+            echo "=== PULL ==="
             git pull origin main
+            echo "=== LAST COMMITS ==="
+            git log --oneline -3
+            echo "=== INSTALL ==="
             source venv/bin/activate || true
             pip install -r requirements.txt || true
+            echo "=== RESTART ==="
             sudo systemctl restart home-monitor
+            echo "=== SERVICE STATUS ==="
+            sudo systemctl status home-monitor --no-pager
