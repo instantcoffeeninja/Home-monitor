@@ -41,6 +41,7 @@ def test_dashboard_returns_200():
             assert response.status == 200
             assert "Sidste server-restart:" in body
             assert "Aktive enheder (192.168.0.x)" in body
+            assert "Scan network" in body
             assert "Farveforklaring" in body
             assert "class=\"dashboard-content\"" in body
             assert ("IP" in body and "Hostname" in body and "Sidst fundet" in body) or "Ingen nmap-resultater endnu." in body
@@ -251,6 +252,49 @@ def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
             ).fetchone()
         assert device_row == ("Min Laptop", "AA:AA:AA:AA:AA:AA")
     finally:
+        server.DB_PATH = original_db_path
+
+
+def test_dashboard_scan_button_triggers_scan_and_refreshes_ui(tmp_path):
+    db_path = tmp_path / "home_monitor_test_manual_scan.db"
+    original_db_path = server.DB_PATH
+    original_scan_and_store = server.scan_and_store
+    server.DB_PATH = str(db_path)
+
+    call_count = {"value": 0}
+
+    def fake_scan_and_store(db_path=None, network_range=server.NETWORK_RANGE, nmap_bin=server.NMAP_BIN):
+        call_count["value"] += 1
+        server.save_scan_results(
+            [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF")],
+            db_path=db_path or server.DB_PATH,
+        )
+        return [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF")]
+
+    server.scan_and_store = fake_scan_and_store
+
+    try:
+        server.init_db(server.DB_PATH)
+        server_instance, port = start_test_server()
+        try:
+            time.sleep(0.1)
+            request = Request(
+                f"http://127.0.0.1:{port}/dashboard/scan",
+                method="POST",
+                data=b"",
+            )
+            with urlopen(request) as response:
+                body = response.read().decode("utf-8")
+                assert response.status == 200
+                assert "scan-device.local" in body
+                assert "192.168.0.80" in body
+
+            assert call_count["value"] == 1
+        finally:
+            server_instance.shutdown()
+            server_instance.server_close()
+    finally:
+        server.scan_and_store = original_scan_and_store
         server.DB_PATH = original_db_path
 
 
