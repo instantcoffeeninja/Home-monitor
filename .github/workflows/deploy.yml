@@ -1,4 +1,5 @@
 name: Deploy
+run-name: Deploy merged PR #${{ github.event.pull_request.number }} to Pi
 
 on:
   pull_request:
@@ -20,20 +21,49 @@ jobs:
           script: |
             set -e
             cd /home/pi/Home-monitor
-            echo "=== PWD ==="
+
+            echo "=== DEPLOY START ==="
+            date
+            echo "PR #${{ github.event.pull_request.number }} merged into main"
+            echo "Merge commit: ${{ github.event.pull_request.merge_commit_sha }}"
+            echo "PR title: ${{ github.event.pull_request.title }}"
+
+            echo "=== CURRENT DIRECTORY ==="
             pwd
-            echo "=== BRANCH ==="
+
+            echo "=== CURRENT BRANCH ==="
             git branch --show-current
+
+            echo "=== REMOTES ==="
+            git remote -v
+
             echo "=== STATUS BEFORE PULL ==="
             git status --short
-            echo "=== PULL ==="
+
+            echo "=== PULLING LATEST CODE ==="
             git pull origin main
-            echo "=== LAST COMMITS ==="
-            git log --oneline -3
-            echo "=== INSTALL ==="
+
+            echo "=== LATEST COMMITS AFTER PULL ==="
+            git log --oneline -5
+
+            echo "=== PYTHON VERSION ==="
+            python3 --version || true
+
+            echo "=== INSTALLING DEPENDENCIES ==="
             source venv/bin/activate || true
             pip install -r requirements.txt || true
-            echo "=== RESTART ==="
+
+            echo "=== RESTARTING SERVICE ==="
             sudo systemctl restart home-monitor
+
             echo "=== SERVICE STATUS ==="
             sudo systemctl status home-monitor --no-pager
+
+            echo "=== RECENT SERVICE LOGS ==="
+            journalctl -u home-monitor -n 20 --no-pager || true
+
+            echo "=== HEALTH CHECK ==="
+            curl -fsS http://127.0.0.1:8000/health || true
+
+            echo
+            echo "=== DEPLOY DONE ==="
