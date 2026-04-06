@@ -20,6 +20,7 @@ NETWORK_RANGE = os.getenv("NETWORK_RANGE", "192.168.0.0/24")
 NMAP_BIN = os.getenv("NMAP_BIN", "nmap")
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", str(60 * 60)))
 
+
 _DB_LOCK = threading.Lock()
 
 
