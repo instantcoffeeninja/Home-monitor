@@ -144,22 +144,28 @@ def test_dashboard_status_color_classes(tmp_path):
         rows = server.get_dashboard_rows(server.DB_PATH)
         status_by_ip = {ip: status for ip, _hostname, _last_seen, status in rows}
 
-        assert status_by_ip["192.168.0.10"] == "status-offline-long"
-        assert status_by_ip["192.168.0.20"] == "status-online-long"
+        assert status_by_ip["192.168.0.10"] == "status-offline"
+        assert status_by_ip["192.168.0.20"] == "status-offline"
         assert status_by_ip["192.168.0.30"] == "status-offline"
-        assert status_by_ip["192.168.0.40"] == "status-new"
+        assert status_by_ip["192.168.0.40"] == "status-offline"
 
         rendered_table = server.render_hosts_table(rows)
         rendered_legend = server.render_status_legend()
-        assert "class=\"status-offline-long\"" in rendered_table
-        assert "class=\"status-online-long\"" in rendered_table
-        assert "class=\"status-offline\"" in rendered_table
-        assert "class=\"status-new\"" in rendered_table
+        assert "class=\"status-dot status-offline\"" in rendered_table
         assert "Farveforklaring" in rendered_legend
-        assert "Offline længe" in rendered_legend
-        assert "Stabil online" in rendered_legend
+        assert "Online" in rendered_legend
+        assert "Idle" in rendered_legend
+        assert "Offline" in rendered_legend
     finally:
         server.DB_PATH = original_db_path
+
+
+def test_status_class_for_last_seen_thresholds():
+    now = datetime(2026, 4, 6, 12, 0, 0, tzinfo=timezone.utc)
+
+    assert server._status_class_for_last_seen("2026-04-06T11:59:10+00:00", now=now) == "status-online"
+    assert server._status_class_for_last_seen("2026-04-06T11:51:00+00:00", now=now) == "status-idle"
+    assert server._status_class_for_last_seen("2026-04-06T11:49:59+00:00", now=now) == "status-offline"
 
 
 def test_hostname_history_links_and_page_content(tmp_path):
