@@ -209,7 +209,7 @@ def test_hostname_history_links_and_page_content(tmp_path):
                 assert "192.168.0.50" in history_body
                 assert "laptop.local" in history_body
                 assert "11:22:33:44:55:66" in history_body
-                assert "Gem hostname" in history_body
+                assert "Gem enhedsnavn" in history_body
                 assert "Luk historik og gå tilbage" in history_body
                 assert "phone.local" not in history_body
         finally:
@@ -252,12 +252,36 @@ def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
             server_instance.server_close()
 
         with sqlite3.connect(server.DB_PATH) as conn:
-            device_row = conn.execute(
-                "SELECT hostname, mac_address FROM devices WHERE ip = ?",
-                ("192.168.0.70",),
+            override_row = conn.execute(
+                "SELECT custom_name FROM device_name_overrides WHERE mac_address = ?",
+                ("AA:AA:AA:AA:AA:AA",),
             ).fetchone()
-        assert device_row == ("Min Laptop", "AA:AA:AA:AA:AA:AA")
+        assert override_row == ("Min Laptop",)
+
+        rows_after_update = server.get_dashboard_rows(server.DB_PATH)
+        hostname_by_ip_after_update = {ip: hostname for ip, hostname, _last_seen, _status in rows_after_update}
+        assert hostname_by_ip_after_update["192.168.0.70"] == "Min Laptop"
     finally:
+        server.DB_PATH = original_db_path
+
+
+def test_avahi_resolve_result_is_used_for_blank_hostname(tmp_path):
+    db_path = tmp_path / "home_monitor_test_avahi.db"
+    original_db_path = server.DB_PATH
+    original_resolver = server.resolve_hostname_with_avahi
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        server.resolve_hostname_with_avahi = lambda _ip, avahi_resolve_bin=server.AVAHI_RESOLVE_BIN: "resolved.local"
+
+        server.save_scan_results([("192.168.0.88", "", "")], db_path=server.DB_PATH)
+
+        rows = server.get_dashboard_rows(server.DB_PATH)
+        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status in rows}
+        assert hostname_by_ip["192.168.0.88"] == "resolved.local"
+    finally:
+        server.resolve_hostname_with_avahi = original_resolver
         server.DB_PATH = original_db_path
 
 
@@ -316,3 +340,21 @@ def test_format_last_seen_human_readable_time():
     assert (
         server._format_last_seen("2026-04-06T09:00:00+00:00", now=now) == "3 hours ago"
     )
+
+
+def test_resolve_hostname_with_avahi_uses_expected_command(monkeypatch):
+    called = {}
+
+    class DummyResult:
+        stdout = "192.168.0.90\tprinter.local\n"
+
+    def fake_run(command, capture_output, text, check):
+        called["command"] = command
+        return DummyResult()
+
+    monkeypatch.setattr(server.subprocess, "run", fake_run)
+
+    resolved = server.resolve_hostname_with_avahi("192.168.0.90")
+
+    assert called["command"] == [server.AVAHI_RESOLVE_BIN, "-a", "192.168.0.90"]
+    assert resolved == "printer.local"
