@@ -18,24 +18,6 @@ When working from this file:
 
 ## [READY]
 
-### Feature: Last seen timestamp
-ID: HM-001
-
-Description:
-Show when each device was last detected.
-
-Acceptance criteria:
-- Show "online now" if seen within 60 seconds
-- Otherwise show "X minutes ago" or "X hours ago"
-- Display in the device table
-- Keep formatting simple and readable
-
-Suggested files:
-- server.py
-- templates/index.html
-- tests/test_server.py
-
-
 ### Feature: Device status indicator
 ID: HM-002
 
@@ -193,3 +175,8 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Last seen timestamp
+ID: HM-001
+Completed: 2026-04-08
+Note: Added human-readable last seen formatting in the device table ("online now", minutes, or hours ago) and covered it with server tests.
