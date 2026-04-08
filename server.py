@@ -243,83 +243,59 @@ def _format_last_seen(last_seen: str, now: datetime | None = None) -> str:
     return f"{hours_since_seen} {unit} ago"
 
 
+def _status_class_for_last_seen(last_seen: str, now: datetime | None = None) -> str:
+    """Maps a device timestamp to online/idle/offline status."""
+
+    try:
+        parsed = datetime.fromisoformat(last_seen)
+    except ValueError:
+        return "status-offline"
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    else:
+        current_time = current_time.astimezone(timezone.utc)
+
+    seconds_since_seen = max(0, int((current_time - parsed).total_seconds()))
+    if seconds_since_seen < 60:
+        return "status-online"
+    if seconds_since_seen < 10 * 60:
+        return "status-idle"
+    return "status-offline"
+
+
 def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, str]]:
-    """Fetches host rows and assigns dashboard color status classes."""
+    """Fetches host rows and assigns online/idle/offline status classes."""
 
     target_db_path = db_path or DB_PATH
     init_db(target_db_path)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
-            scan_timestamps = [
-                row[0]
-                for row in conn.execute(
-                    "SELECT DISTINCT scanned_at FROM nmap_results ORDER BY scanned_at DESC"
-                ).fetchall()
-            ]
-            if not scan_timestamps:
-                return []
-
             host_rows = conn.execute(
                 """
                 SELECT latest.ip,
                        COALESCE(d.hostname, latest.ip) AS hostname,
-                       latest.last_seen,
-                       first_seen.first_seen
+                       latest.last_seen
                 FROM (
                     SELECT ip, MAX(scanned_at) AS last_seen
                     FROM nmap_results
                     GROUP BY ip
                 ) AS latest
-                JOIN (
-                    SELECT ip, MIN(scanned_at) AS first_seen
-                    FROM nmap_results
-                    GROUP BY ip
-                ) AS first_seen ON first_seen.ip = latest.ip
                 LEFT JOIN devices d ON d.ip = latest.ip
                 ORDER BY latest.ip ASC
                 """
             ).fetchall()
 
-            presence_rows = conn.execute(
-                """
-                SELECT ip, scanned_at
-                FROM nmap_results
-                GROUP BY ip, scanned_at
-                """
-            ).fetchall()
-
-    scans_by_ip: dict[str, set[str]] = {}
-    for ip, scanned_at in presence_rows:
-        scans_by_ip.setdefault(ip, set()).add(scanned_at)
-
-    classified_rows: list[tuple[str, str, str, str]] = []
-    latest_scan = scan_timestamps[0]
-
-    for ip, hostname, last_seen, first_seen in host_rows:
-        scans_for_ip = scans_by_ip.get(ip, set())
-        status_class = ""
-
-        if first_seen == latest_scan:
-            status_class = "status-new"
-        elif latest_scan not in scans_for_ip:
-            offline_streak = 0
-            for scan_ts in scan_timestamps:
-                if scan_ts in scans_for_ip:
-                    break
-                offline_streak += 1
-            status_class = "status-offline-long" if offline_streak > 3 else "status-offline"
-        else:
-            online_streak = 0
-            for scan_ts in scan_timestamps:
-                if scan_ts not in scans_for_ip:
-                    break
-                online_streak += 1
-            if online_streak > 3:
-                status_class = "status-online-long"
-
-        classified_rows.append((ip, hostname, last_seen, status_class))
-
-    return classified_rows
+    return [
+        (ip, hostname, last_seen, _status_class_for_last_seen(last_seen))
+        for ip, hostname, last_seen in host_rows
+    ]
 
 
 def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
@@ -331,9 +307,9 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
     body_rows = "\n".join(
         (
             "<tr>"
-            f"<td class=\"{status_class}\">{escape(ip)}</td>"
-            f"<td class=\"{status_class}\">{_render_hostname_cell(hostname, ip)}</td>"
-            f"<td class=\"{status_class}\">{_format_last_seen(last_seen)}</td>"
+            f"<td>{escape(ip)}</td>"
+            f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}</td>"
+            f"<td>{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
         for ip, hostname, last_seen, status_class in rows
@@ -354,10 +330,9 @@ def render_status_legend() -> str:
     """Builds legend that explains dashboard status colors."""
 
     legend_items = [
-        ("status-new", "Ny enhed", "Set første gang i seneste scanning."),
-        ("status-offline", "Offline", "Ikke set i seneste scanning."),
-        ("status-offline-long", "Offline længe", "Ikke set i mere end 3 scanninger."),
-        ("status-online-long", "Stabil online", "Set i mere end 3 scanninger i træk."),
+        ("status-online", "Online", "Set for mindre end 60 sekunder siden."),
+        ("status-idle", "Idle", "Set for mindre end 10 minutter siden."),
+        ("status-offline", "Offline", "Ikke set de seneste 10 minutter."),
     ]
     legend_rows = "\n".join(
         (
@@ -636,20 +611,16 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         background: #f5f5f5;
       }}
 
-      .status-new {{
-        background: #f8caca;
+      .status-online {{
+        background: #2e7d32;
+      }}
+
+      .status-idle {{
+        background: #f9a825;
       }}
 
       .status-offline {{
-        background: #fff4b8;
-      }}
-
-      .status-offline-long {{
-        background: #ffd8a8;
-      }}
-
-      .status-online-long {{
-        background: #d8f5c0;
+        background: #c62828;
       }}
 
       .dashboard-content {{
@@ -696,6 +667,15 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         border-radius: 3px;
         display: inline-block;
         flex: 0 0 14px;
+      }}
+
+      .status-dot {{
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+        vertical-align: middle;
       }}
     </style>
   </head>

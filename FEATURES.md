@@ -18,24 +18,6 @@ When working from this file:
 
 ## [READY]
 
-### Feature: Device status indicator
-ID: HM-002
-
-Description:
-Show a visual status for each device.
-
-Acceptance criteria:
-- Green = online if last seen < 60 seconds
-- Yellow = idle if last seen < 10 minutes
-- Red = offline otherwise
-- Display as a colored dot next to each device
-- Must not break existing table layout
-
-Suggested files:
-- server.py
-- templates/index.html
-- tests/test_server.py
-
 
 ## [BACKLOG]
 
@@ -175,6 +157,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Device status indicator
+ID: HM-002
+Completed: 2026-04-08
+Note: Replaced scan-streak statuses with time-based online/idle/offline logic and rendered a colored status dot next to each device hostname.
 
 ### Feature: Last seen timestamp
 ID: HM-001
