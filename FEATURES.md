@@ -1,111 +1,195 @@
 # Home Monitor Features
 
+## Instructions for Codex
+When working from this file:
+
+1. Find the first feature under [READY]
+2. Implement only that feature
+3. Follow the acceptance criteria exactly
+4. Keep changes minimal
+5. Add or update tests if relevant
+6. Do not modify unrelated features
+7. When the feature is complete:
+   - move it from [READY] to [DONE]
+   - add today's date
+   - add a short note about what was implemented
+
+---
+
 ## [READY]
 
 ### Feature: Last seen timestamp
+ID: HM-001
+
 Description:
 Show when each device was last detected.
 
 Acceptance criteria:
 - Show "online now" if seen within 60 seconds
 - Otherwise show "X minutes ago" or "X hours ago"
-- Display in device table
+- Display in the device table
+- Keep formatting simple and readable
 
-Files:
+Suggested files:
 - server.py
+- templates/index.html
+- tests/test_server.py
 
 
 ### Feature: Device status indicator
+ID: HM-002
+
 Description:
-Show visual status for each device.
+Show a visual status for each device.
 
 Acceptance criteria:
-- Green = online (< 60 sec)
-- Yellow = idle (< 10 min)
-- Red = offline (> 10 min)
-- Display as colored dot in UI
+- Green = online if last seen < 60 seconds
+- Yellow = idle if last seen < 10 minutes
+- Red = offline otherwise
+- Display as a colored dot next to each device
+- Must not break existing table layout
 
-Files:
+Suggested files:
 - server.py
+- templates/index.html
+- tests/test_server.py
 
 
 ## [BACKLOG]
 
 ### Feature: Device naming (manual override)
+ID: HM-003
+
 Description:
-Allow user to assign custom names to devices.
+Allow the user to assign a custom name to a device.
 
 Acceptance criteria:
-- Map MAC → name
-- Persist in SQLite
-- Show name instead of IP when available
+- Map MAC address to a custom device name
+- Persist mapping in SQLite
+- Show custom name instead of raw IP when available
+- Keep fallback to IP if no name exists
+
+Suggested files:
+- server.py
+- home_monitor.db
+- templates/index.html
 
 
 ### Feature: Device vendor display
+ID: HM-004
+
 Description:
-Show device manufacturer based on MAC address.
+Show the manufacturer/vendor based on MAC address.
 
 Acceptance criteria:
-- Extract vendor from MAC (OUI lookup)
-- Show next to device name
+- Show vendor name when MAC address is known
+- Keep fallback if vendor cannot be determined
+- Display vendor next to device name or MAC
+
+Suggested files:
+- server.py
+- templates/index.html
 
 
 ### Feature: Device summary bar
+ID: HM-005
+
 Description:
-Show total devices and status overview.
+Show a summary bar at the top of the dashboard.
 
 Acceptance criteria:
-- Display:
-  - X online
-  - X idle
-  - X offline
-- Visible at top of dashboard
+- Display total number of devices
+- Display count of online devices
+- Display count of idle devices
+- Display count of offline devices
+
+Suggested files:
+- server.py
+- templates/index.html
 
 
 ### Feature: Scan network button
+ID: HM-006
+
 Description:
-Add button to trigger network scan manually.
+Allow the user to trigger a manual network scan from the dashboard.
 
 Acceptance criteria:
-- Button in UI
-- Triggers backend nmap scan
+- Add a "Scan network" button to the UI
+- Trigger backend scan when clicked
 - Refresh device list after scan
+- Keep implementation simple
+
+Suggested files:
+- server.py
+- templates/index.html
+- tests/test_server.py
 
 
 ### Feature: Auto-refresh dashboard
+ID: HM-007
+
 Description:
-Keep dashboard updated automatically.
+Keep the dashboard updated automatically.
 
 Acceptance criteria:
 - Refresh every 10 seconds
-- No full page reload (simple fetch or reload ok)
+- A simple full-page reload is acceptable
+- Must not break manual usage
+
+Suggested files:
+- templates/index.html
 
 
 ### Feature: Highlight new devices
+ID: HM-008
+
 Description:
-Make newly discovered devices visible.
+Make newly discovered devices easier to spot.
 
 Acceptance criteria:
-- Mark devices seen for first time within last 5 minutes
-- Highlight with color or badge
+- Mark devices first seen within the last 5 minutes
+- Show a badge or highlight color
+- Must be visually clear but simple
+
+Suggested files:
+- server.py
+- templates/index.html
 
 
 ### Feature: Device history tracking
+ID: HM-009
+
 Description:
-Store historical activity for each device.
+Store simple history for device detection.
 
 Acceptance criteria:
-- Save timestamps of detections
-- Show simple history (last seen list or count)
+- Save detection timestamps
+- Show either a count or a simple recent history
+- Keep database changes minimal
+
+Suggested files:
+- server.py
+- home_monitor.db
+- templates/index.html
 
 
 ### Feature: Export device list
+ID: HM-010
+
 Description:
-Allow exporting current devices.
+Allow exporting the current device list.
 
 Acceptance criteria:
 - Export as JSON or CSV
-- Include IP, MAC, last seen, name
+- Include IP, MAC, last seen, and custom name if available
+- Add a simple button or endpoint
 
+Suggested files:
+- server.py
+- templates/index.html
+- tests/test_server.py
+
+---
 
 ## [DONE]
