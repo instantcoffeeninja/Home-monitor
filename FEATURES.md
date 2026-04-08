@@ -19,10 +19,6 @@ When working from this file:
 ## [READY]
 
 
-
-## [BACKLOG]
-
-
 ### Feature: Device vendor display
 ID: HM-004
 
@@ -37,6 +33,9 @@ Acceptance criteria:
 Suggested files:
 - server.py
 - templates/index.html
+
+
+## [BACKLOG]
 
 
 ### Feature: Device summary bar
