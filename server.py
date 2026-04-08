@@ -19,6 +19,7 @@ DB_PATH = os.getenv("DB_PATH", "home_monitor.db")
 NETWORK_RANGE = os.getenv("NETWORK_RANGE", "192.168.0.0/24")
 NMAP_BIN = os.getenv("NMAP_BIN", "nmap")
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", str(60 * 60)))
+AVAHI_RESOLVE_BIN = os.getenv("AVAHI_RESOLVE_BIN", "avahi-resolve")
 
 
 _DB_LOCK = threading.Lock()
@@ -61,6 +62,14 @@ def init_db(db_path: str | None = None) -> None:
                     ip TEXT PRIMARY KEY,
                     hostname TEXT NOT NULL,
                     mac_address TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS device_name_overrides (
+                    mac_address TEXT PRIMARY KEY,
+                    custom_name TEXT NOT NULL
                 )
                 """
             )
@@ -128,6 +137,27 @@ def _normalize_hostname(hostname: str, ip: str) -> str:
     return clean_hostname if clean_hostname else ip
 
 
+def resolve_hostname_with_avahi(ip: str, avahi_resolve_bin: str = AVAHI_RESOLVE_BIN) -> str:
+    """Resolves hostname via avahi-resolve -a and returns blank when unavailable."""
+
+    try:
+        result = subprocess.run(
+            [avahi_resolve_bin, "-a", ip],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+    output = (result.stdout or "").strip()
+    if "	" in output:
+        return output.split("	", 1)[1].strip()
+    if output and " " in output:
+        return output.split(None, 1)[1].strip()
+    return ""
+
+
 def save_scan_results(hosts: list[tuple[str, str, str]], db_path: str | None = None) -> None:
     """Saves a scan result batch to sqlite."""
 
@@ -141,14 +171,20 @@ def save_scan_results(hosts: list[tuple[str, str, str]], db_path: str | None = N
                 [(scanned_at, ip, hostname, mac_address) for ip, hostname, mac_address in hosts],
             )
             for ip, hostname, mac_address in hosts:
+                resolved_hostname = resolve_hostname_with_avahi(ip)
+                preferred_hostname = resolved_hostname or hostname
                 conn.execute(
                     """
                     INSERT INTO devices (ip, hostname, mac_address)
                     VALUES (?, ?, NULLIF(?, ''))
                     ON CONFLICT(ip) DO UPDATE SET
+                      hostname = CASE
+                        WHEN excluded.hostname IS NOT NULL AND excluded.hostname <> excluded.ip THEN excluded.hostname
+                        ELSE devices.hostname
+                      END,
                       mac_address = COALESCE(NULLIF(excluded.mac_address, ''), devices.mac_address)
                     """,
-                    (ip, _normalize_hostname(hostname, ip), mac_address),
+                    (ip, _normalize_hostname(preferred_hostname, ip), mac_address),
                 )
             conn.commit()
 
@@ -280,7 +316,7 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
             host_rows = conn.execute(
                 """
                 SELECT latest.ip,
-                       COALESCE(d.hostname, latest.ip) AS hostname,
+                       COALESCE(o.custom_name, d.hostname, latest.ip) AS hostname,
                        latest.last_seen
                 FROM (
                     SELECT ip, MAX(scanned_at) AS last_seen
@@ -288,12 +324,13 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
                     GROUP BY ip
                 ) AS latest
                 LEFT JOIN devices d ON d.ip = latest.ip
+                LEFT JOIN device_name_overrides o ON o.mac_address = d.mac_address
                 ORDER BY latest.ip ASC
                 """
             ).fetchall()
 
     return [
-        (ip, hostname, last_seen, _status_class_for_last_seen(last_seen))
+        (ip, _normalize_hostname(hostname, ip), last_seen, _status_class_for_last_seen(last_seen))
         for ip, hostname, last_seen in host_rows
     ]
 
@@ -386,14 +423,20 @@ def get_ip_history(ip: str, db_path: str | None = None) -> list[tuple[str, str, 
 
 
 def get_saved_hostname(ip: str, db_path: str | None = None) -> str:
-    """Returns editable hostname from devices table for one IP."""
+    """Returns editable custom device name for one IP when MAC is known."""
 
     target_db_path = db_path or DB_PATH
     init_db(target_db_path)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
             row = conn.execute(
-                "SELECT hostname FROM devices WHERE ip = ? LIMIT 1",
+                """
+                SELECT COALESCE(o.custom_name, d.hostname, d.ip), COALESCE(d.mac_address, '')
+                FROM devices d
+                LEFT JOIN device_name_overrides o ON o.mac_address = d.mac_address
+                WHERE d.ip = ?
+                LIMIT 1
+                """,
                 (ip,),
             ).fetchone()
 
@@ -403,21 +446,37 @@ def get_saved_hostname(ip: str, db_path: str | None = None) -> str:
 
 
 def update_saved_hostname(ip: str, hostname: str, db_path: str | None = None) -> str:
-    """Updates editable hostname for IP and returns normalized hostname."""
+    """Updates custom device name for IP MAC mapping and returns normalized hostname."""
 
     target_db_path = db_path or DB_PATH
     normalized_hostname = _normalize_hostname(hostname, ip)
     init_db(target_db_path)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO devices (ip, hostname, mac_address)
-                VALUES (?, ?, NULL)
-                ON CONFLICT(ip) DO UPDATE SET hostname = excluded.hostname
-                """,
-                (ip, normalized_hostname),
-            )
+            mac_row = conn.execute(
+                "SELECT COALESCE(mac_address, '') FROM devices WHERE ip = ? LIMIT 1",
+                (ip,),
+            ).fetchone()
+            mac_address = (mac_row[0] if mac_row else "").strip()
+
+            if mac_address:
+                conn.execute(
+                    """
+                    INSERT INTO device_name_overrides (mac_address, custom_name)
+                    VALUES (?, ?)
+                    ON CONFLICT(mac_address) DO UPDATE SET custom_name = excluded.custom_name
+                    """,
+                    (mac_address, normalized_hostname),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO devices (ip, hostname, mac_address)
+                    VALUES (?, ?, NULL)
+                    ON CONFLICT(ip) DO UPDATE SET hostname = excluded.hostname
+                    """,
+                    (ip, normalized_hostname),
+                )
             conn.commit()
     return normalized_hostname
 
@@ -445,9 +504,9 @@ def render_hostname_history_table(ip: str, saved_hostname: str, rows: list[tuple
     <h2>Historik for IP: {escaped_ip}</h2>
     <form method="post" action="/history/update">
       <input type="hidden" name="ip" value="{escaped_ip}" />
-      <label for="hostname"><strong>Hostname (redigerbar):</strong></label>
+      <label for="hostname"><strong>Enhedsnavn (brugerdefineret):</strong></label>
       <input id="hostname" name="hostname" value="{escaped_saved_hostname}" />
-      <button type="submit">Gem hostname</button>
+      <button type="submit">Gem enhedsnavn</button>
     </form>
     <p><a href="/dashboard">Luk historik og gå tilbage</a></p>
     <table>
