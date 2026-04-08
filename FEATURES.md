@@ -19,15 +19,15 @@ When working from this file:
 ## [READY]
 
 
-## [BACKLOG]
-
 ### Feature: Device naming (manual override)
 ID: HM-003
 
 Description:
+Lookup Hostname using avahi-resolve command.
 Allow the user to assign a custom name to a device.
 
 Acceptance criteria:
+- avahi-resolve -a IP is used to resolve the hostname if possible
 - Map MAC address to a custom device name
 - Persist mapping in SQLite
 - Show custom name instead of raw IP when available
@@ -37,6 +37,9 @@ Suggested files:
 - server.py
 - home_monitor.db
 - templates/index.html
+
+
+## [BACKLOG]
 
 
 ### Feature: Device vendor display
