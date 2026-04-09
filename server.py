@@ -19,6 +19,8 @@ DB_PATH = os.getenv("DB_PATH", "home_monitor.db")
 NETWORK_RANGE = os.getenv("NETWORK_RANGE", "192.168.0.0/24")
 NMAP_BIN = os.getenv("NMAP_BIN", "nmap")
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", str(60 * 60)))
+PING_INTERVAL_SECONDS = int(os.getenv("PING_INTERVAL_SECONDS", str(5 * 60)))
+PING_BIN = os.getenv("PING_BIN", "ping")
 AVAHI_RESOLVE_BIN = os.getenv("AVAHI_RESOLVE_BIN", "avahi-resolve")
 
 
@@ -63,7 +65,8 @@ def init_db(db_path: str | None = None) -> None:
                     ip TEXT PRIMARY KEY,
                     hostname TEXT NOT NULL,
                     mac_address TEXT,
-                    mac_vendor TEXT
+                    mac_vendor TEXT,
+                    ping_enabled INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -88,6 +91,8 @@ def init_db(db_path: str | None = None) -> None:
             device_columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
             if "mac_vendor" not in device_columns:
                 conn.execute("ALTER TABLE devices ADD COLUMN mac_vendor TEXT")
+            if "ping_enabled" not in device_columns:
+                conn.execute("ALTER TABLE devices ADD COLUMN ping_enabled INTEGER NOT NULL DEFAULT 0")
             conn.commit()
 
 
@@ -202,6 +207,108 @@ def save_scan_results(hosts: list[tuple[str, str, str, str]], db_path: str | Non
                     (ip, _normalize_hostname(preferred_hostname, ip), mac_address, mac_vendor),
                 )
             conn.commit()
+
+
+def get_ping_enabled_ips(db_path: str | None = None) -> set[str]:
+    """Returns all IPs where ping monitoring is enabled."""
+
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            rows = conn.execute(
+                "SELECT ip FROM devices WHERE ping_enabled = 1 ORDER BY ip ASC"
+            ).fetchall()
+    return {ip for (ip,) in rows}
+
+
+def ping_host(ip: str, ping_bin: str = PING_BIN) -> bool:
+    """Returns True when one ICMP ping succeeds."""
+
+    try:
+        subprocess.run(
+            [ping_bin, "-c", "1", "-W", "1", ip],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return True
+
+
+def _record_ping_success(ip: str, db_path: str | None = None) -> None:
+    """Persists a successful ping as a seen event."""
+
+    target_db_path = db_path or DB_PATH
+    scanned_at = datetime.now(timezone.utc).isoformat()
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT COALESCE(hostname, ip), COALESCE(mac_address, ''), COALESCE(mac_vendor, '')
+                FROM devices
+                WHERE ip = ?
+                LIMIT 1
+                """,
+                (ip,),
+            ).fetchone()
+            if not row:
+                return
+            hostname, mac_address, mac_vendor = row
+            conn.execute(
+                """
+                INSERT INTO nmap_results (scanned_at, ip, hostname, mac_address, mac_vendor)
+                VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
+                """,
+                (scanned_at, ip, _normalize_hostname(hostname, ip), mac_address, mac_vendor),
+            )
+            conn.commit()
+
+
+def set_ping_enabled(ip: str, enabled: bool, db_path: str | None = None) -> None:
+    """Stores ping-enabled flag per device and runs an immediate ping when enabled."""
+
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    normalized_ip = ip.strip()
+    if not normalized_ip:
+        return
+
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            conn.execute(
+                """
+                UPDATE devices
+                SET ping_enabled = ?
+                WHERE ip = ?
+                """,
+                (1 if enabled else 0, normalized_ip),
+            )
+            conn.commit()
+
+    if enabled and ping_host(normalized_ip):
+        _record_ping_success(normalized_ip, db_path=target_db_path)
+
+
+def run_ping_checks(db_path: str | None = None) -> None:
+    """Pings all selected devices and records successful responses."""
+
+    target_db_path = db_path or DB_PATH
+    for ip in get_ping_enabled_ips(db_path=target_db_path):
+        if ping_host(ip):
+            _record_ping_success(ip, db_path=target_db_path)
+
+
+def ping_scheduler(stop_event: threading.Event, interval_seconds: int = PING_INTERVAL_SECONDS) -> None:
+    """Runs ping checks every five minutes (configurable interval)."""
+
+    while not stop_event.is_set():
+        try:
+            run_ping_checks()
+        except sqlite3.Error as exc:
+            print(f"SQLite error during ping checks: {exc}")
+        stop_event.wait(interval_seconds)
 
 
 def get_latest_scan_results(db_path: str | None = None) -> list[tuple[str, str, str]]:
@@ -359,15 +466,17 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
     ]
 
 
-def render_hosts_table(rows: list[tuple[str, str, str, str, str, str]]) -> str:
+def render_hosts_table(rows: list[tuple[str, str, str, str, str, str]], ping_enabled_ips: set[str] | None = None) -> str:
     """Builds HTML table for hosts list."""
 
     if not rows:
         return "<p>Ingen nmap-resultater endnu.</p>"
 
+    selected_ips = ping_enabled_ips or set()
     body_rows = "\n".join(
         (
             "<tr>"
+            f"<td><form method=\"post\" action=\"/dashboard/ping-selection\"><input type=\"hidden\" name=\"ip\" value=\"{escape(ip)}\" /><input type=\"hidden\" name=\"ping_enabled\" value=\"0\" /><input type=\"checkbox\" name=\"ping_enabled\" value=\"1\" aria-label=\"Enable ping for {escape(ip)}\" {'checked' if ip in selected_ips else ''} onchange=\"this.form.submit()\" /></form></td>"
             f"<td>{escape(ip)}</td>"
             f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}{_render_vendor_detail(mac_vendor, mac_address)}</td>"
             f"<td>{_format_last_seen(last_seen)}</td>"
@@ -378,7 +487,7 @@ def render_hosts_table(rows: list[tuple[str, str, str, str, str, str]]) -> str:
     return f"""
     <table>
       <thead>
-        <tr><th>IP</th><th>Hostname</th><th>Sidst fundet</th></tr>
+        <tr><th>Ping</th><th>IP</th><th>Hostname</th><th>Sidst fundet</th></tr>
       </thead>
       <tbody>
         {body_rows}
@@ -584,6 +693,23 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if parsed_path.path == "/dashboard/ping-selection":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length).decode("utf-8")
+            form_data = parse_qs(raw_body)
+
+            ip = form_data.get("ip", [""])[0].strip()
+            enabled = form_data.get("ping_enabled", ["0"])[-1] == "1"
+            if not ip:
+                self.send_error(HTTPStatus.BAD_REQUEST, "IP field is required")
+                return
+
+            set_ping_enabled(ip, enabled)
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", "/dashboard")
+            self.end_headers()
+            return
+
         if parsed_path.path != "/history/update":
             self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
             return
@@ -678,7 +804,8 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
         restart_time = format_restart_time(SERVER_RESTART_TIME)
         rows = get_dashboard_rows()
-        hosts_table = render_hosts_table(rows)
+        ping_enabled_ips = get_ping_enabled_ips()
+        hosts_table = render_hosts_table(rows, ping_enabled_ips=ping_enabled_ips)
         status_legend = render_status_legend()
         summary_bar = render_device_summary_bar(rows)
         html = f"""<!doctype html>
@@ -732,6 +859,10 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
       th {{
         background: #f5f5f5;
+      }}
+
+      td form {{
+        margin: 0;
       }}
 
       .status-online {{
@@ -832,7 +963,9 @@ def main() -> None:
     init_db()
     stop_event = threading.Event()
     scanner_thread = threading.Thread(target=scan_scheduler, args=(stop_event,), daemon=True)
+    ping_thread = threading.Thread(target=ping_scheduler, args=(stop_event,), daemon=True)
     scanner_thread.start()
+    ping_thread.start()
 
     server = ThreadingHTTPServer((HOST, PORT), HomeMonitorHandler)
     print(f"Home Monitor kører på http://{HOST}:{PORT}")
