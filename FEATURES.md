@@ -19,22 +19,6 @@ When working from this file:
 ## [READY]
 
 
-### Feature: Device vendor display
-ID: HM-004
-
-Description:
-Show the manufacturer/vendor based on MAC address.
-
-Acceptance criteria:
-- Show vendor name when MAC address is known
-- Keep fallback if vendor cannot be determined
-- Display vendor next to device name or MAC
-
-Suggested files:
-- server.py
-- templates/index.html
-
-
 ### Feature: Device summary bar
 ID: HM-005
 
@@ -144,6 +128,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Device vendor display
+ID: HM-004
+Completed: 2026-04-09
+Note: Parsed vendor names from nmap MAC output, saved vendor in SQLite, and displayed vendor next to hostname with MAC fallback when vendor is unavailable.
 
 ### Feature: Device naming (manual override)
 ID: HM-003

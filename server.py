@@ -52,7 +52,8 @@ def init_db(db_path: str | None = None) -> None:
                     scanned_at TEXT NOT NULL,
                     ip TEXT NOT NULL,
                     hostname TEXT,
-                    mac_address TEXT
+                    mac_address TEXT,
+                    mac_vendor TEXT
                 )
                 """
             )
@@ -61,7 +62,8 @@ def init_db(db_path: str | None = None) -> None:
                 CREATE TABLE IF NOT EXISTS devices (
                     ip TEXT PRIMARY KEY,
                     hostname TEXT NOT NULL,
-                    mac_address TEXT
+                    mac_address TEXT,
+                    mac_vendor TEXT
                 )
                 """
             )
@@ -81,13 +83,18 @@ def init_db(db_path: str | None = None) -> None:
                 conn.execute("ALTER TABLE nmap_results ADD COLUMN hostname TEXT")
             if "mac_address" not in columns:
                 conn.execute("ALTER TABLE nmap_results ADD COLUMN mac_address TEXT")
+            if "mac_vendor" not in columns:
+                conn.execute("ALTER TABLE nmap_results ADD COLUMN mac_vendor TEXT")
+            device_columns = {row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()}
+            if "mac_vendor" not in device_columns:
+                conn.execute("ALTER TABLE devices ADD COLUMN mac_vendor TEXT")
             conn.commit()
 
 
-def parse_nmap_grepable(output: str) -> list[tuple[str, str, str]]:
-    """Parses nmap -oG output and returns active hosts as (ip, hostname, mac)."""
+def parse_nmap_grepable(output: str) -> list[tuple[str, str, str, str]]:
+    """Parses nmap -oG output and returns active hosts as (ip, hostname, mac, vendor)."""
 
-    hosts: list[tuple[str, str, str]] = []
+    hosts: list[tuple[str, str, str, str]] = []
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line.startswith("Host:") or "Status: Up" not in line:
@@ -107,22 +114,26 @@ def parse_nmap_grepable(output: str) -> list[tuple[str, str, str]]:
             continue
 
         mac_address = ""
+        mac_vendor = ""
         if "MAC Address:" in line:
             try:
                 mac_part = line.split("MAC Address:", 1)[1].strip()
                 mac_address = mac_part.split()[0]
+                if " (" in mac_part and mac_part.endswith(")"):
+                    mac_vendor = mac_part.split(" (", 1)[1][:-1].strip()
             except IndexError:
                 mac_address = ""
+                mac_vendor = ""
 
         if ip:
-            hosts.append((ip, hostname, mac_address))
+            hosts.append((ip, hostname, mac_address, mac_vendor))
 
     return hosts
 
 
 def run_nmap_scan(
     network_range: str = NETWORK_RANGE, nmap_bin: str = NMAP_BIN
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, str]]:
     """Runs nmap ping scan and returns active hosts."""
 
     command = [nmap_bin, "-sn", "-R", network_range, "-oG", "-"]
@@ -158,7 +169,7 @@ def resolve_hostname_with_avahi(ip: str, avahi_resolve_bin: str = AVAHI_RESOLVE_
     return ""
 
 
-def save_scan_results(hosts: list[tuple[str, str, str]], db_path: str | None = None) -> None:
+def save_scan_results(hosts: list[tuple[str, str, str, str]], db_path: str | None = None) -> None:
     """Saves a scan result batch to sqlite."""
 
     target_db_path = db_path or DB_PATH
@@ -167,24 +178,28 @@ def save_scan_results(hosts: list[tuple[str, str, str]], db_path: str | None = N
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
             conn.executemany(
-                "INSERT INTO nmap_results (scanned_at, ip, hostname, mac_address) VALUES (?, ?, ?, ?)",
-                [(scanned_at, ip, hostname, mac_address) for ip, hostname, mac_address in hosts],
+                """
+                INSERT INTO nmap_results (scanned_at, ip, hostname, mac_address, mac_vendor)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [(scanned_at, ip, hostname, mac_address, mac_vendor) for ip, hostname, mac_address, mac_vendor in hosts],
             )
-            for ip, hostname, mac_address in hosts:
+            for ip, hostname, mac_address, mac_vendor in hosts:
                 resolved_hostname = resolve_hostname_with_avahi(ip)
                 preferred_hostname = resolved_hostname or hostname
                 conn.execute(
                     """
-                    INSERT INTO devices (ip, hostname, mac_address)
-                    VALUES (?, ?, NULLIF(?, ''))
+                    INSERT INTO devices (ip, hostname, mac_address, mac_vendor)
+                    VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''))
                     ON CONFLICT(ip) DO UPDATE SET
                       hostname = CASE
                         WHEN excluded.hostname IS NOT NULL AND excluded.hostname <> excluded.ip THEN excluded.hostname
                         ELSE devices.hostname
                       END,
-                      mac_address = COALESCE(NULLIF(excluded.mac_address, ''), devices.mac_address)
+                      mac_address = COALESCE(NULLIF(excluded.mac_address, ''), devices.mac_address),
+                      mac_vendor = COALESCE(NULLIF(excluded.mac_vendor, ''), devices.mac_vendor)
                     """,
-                    (ip, _normalize_hostname(preferred_hostname, ip), mac_address),
+                    (ip, _normalize_hostname(preferred_hostname, ip), mac_address, mac_vendor),
                 )
             conn.commit()
 
@@ -222,7 +237,7 @@ def scan_and_store(
     db_path: str | None = None,
     network_range: str = NETWORK_RANGE,
     nmap_bin: str = NMAP_BIN,
-) -> list[tuple[str, str, str]]:
+) -> list[tuple[str, str, str, str]]:
     """Runs scan and persists the results."""
 
     hosts = run_nmap_scan(network_range=network_range, nmap_bin=nmap_bin)
@@ -306,7 +321,7 @@ def _status_class_for_last_seen(last_seen: str, now: datetime | None = None) -> 
     return "status-offline"
 
 
-def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, str]]:
+def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, str, str, str]]:
     """Fetches host rows and assigns online/idle/offline status classes."""
 
     target_db_path = db_path or DB_PATH
@@ -317,7 +332,9 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
                 """
                 SELECT latest.ip,
                        COALESCE(o.custom_name, d.hostname, latest.ip) AS hostname,
-                       latest.last_seen
+                       latest.last_seen,
+                       COALESCE(d.mac_address, '') AS mac_address,
+                       COALESCE(d.mac_vendor, '') AS mac_vendor
                 FROM (
                     SELECT ip, MAX(scanned_at) AS last_seen
                     FROM nmap_results
@@ -330,12 +347,19 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
             ).fetchall()
 
     return [
-        (ip, _normalize_hostname(hostname, ip), last_seen, _status_class_for_last_seen(last_seen))
-        for ip, hostname, last_seen in host_rows
+        (
+            ip,
+            _normalize_hostname(hostname, ip),
+            last_seen,
+            _status_class_for_last_seen(last_seen),
+            mac_address,
+            mac_vendor,
+        )
+        for ip, hostname, last_seen, mac_address, mac_vendor in host_rows
     ]
 
 
-def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
+def render_hosts_table(rows: list[tuple[str, str, str, str, str, str]]) -> str:
     """Builds HTML table for hosts list."""
 
     if not rows:
@@ -345,11 +369,11 @@ def render_hosts_table(rows: list[tuple[str, str, str, str]]) -> str:
         (
             "<tr>"
             f"<td>{escape(ip)}</td>"
-            f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}</td>"
+            f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}{_render_vendor_detail(mac_vendor, mac_address)}</td>"
             f"<td>{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
-        for ip, hostname, last_seen, status_class in rows
+        for ip, hostname, last_seen, status_class, mac_address, mac_vendor in rows
     )
     return f"""
     <table>
@@ -400,6 +424,16 @@ def _render_hostname_cell(hostname: str, ip: str) -> str:
         f"<a href=\"/history?ip={encoded_ip}\" "
         f"title=\"Vis historik for {escape(clean_hostname)}\">{escape(clean_hostname)}</a>"
     )
+
+
+def _render_vendor_detail(mac_vendor: str, mac_address: str) -> str:
+    """Renders vendor text next to hostname with MAC fallback when vendor is unknown."""
+
+    if mac_vendor.strip():
+        return f' <span class="vendor-label">({escape(mac_vendor.strip())})</span>'
+    if mac_address.strip():
+        return f' <span class="vendor-label">({escape(mac_address.strip())})</span>'
+    return ""
 
 
 def get_ip_history(ip: str, db_path: str | None = None) -> list[tuple[str, str, str, str]]:
