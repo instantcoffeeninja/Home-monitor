@@ -19,21 +19,6 @@ When working from this file:
 ## [READY]
 
 
-### Feature: Auto-refresh dashboard
-ID: HM-007
-
-Description:
-Keep the dashboard updated automatically.
-
-Acceptance criteria:
-- Refresh every 30 seconds
-- A simple full-page reload is acceptable
-- Must not break manual usage
-
-Suggested files:
-- templates/index.html
-
-
 ### Feature: Highlight new devices
 ID: HM-008
 
@@ -89,6 +74,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Auto-refresh dashboard
+ID: HM-007
+Completed: 2026-04-09
+Note: Added a 30-second meta refresh tag to the dashboard page head so the page auto-reloads while preserving existing manual controls.
 
 ### Feature: Ping the found devices
 ID: HM-006
