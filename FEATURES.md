@@ -19,9 +19,6 @@ When working from this file:
 ## [READY]
 
 
-## [BACKLOG]
-
-
 ### Feature: Auto-refresh dashboard
 ID: HM-007
 
@@ -29,7 +26,7 @@ Description:
 Keep the dashboard updated automatically.
 
 Acceptance criteria:
-- Refresh every 10 seconds
+- Refresh every 30 seconds
 - A simple full-page reload is acceptable
 - Must not break manual usage
 
@@ -51,6 +48,9 @@ Acceptance criteria:
 Suggested files:
 - server.py
 - templates/index.html
+
+
+## [BACKLOG]
 
 
 ### Feature: Device history tracking
