@@ -19,28 +19,6 @@ When working from this file:
 ## [READY]
 
 
-### Feature: Ping the found devices
-ID: HM-006
-
-Description:
-Add a checkbox to the far left side of the table - this enabled ping if selected.
-The devices that nmap has identified and placed in the database are to be ping'ed once every 5 minutes and status is shown just like the nmap result.
-No additional column for status is needed.
-
-Acceptance criteria:
-- It is possible to select each item individually
-- Trigger backend "ping" when selected
-- Selection is stored in the database on each device
-- Default is NOT selected, also on newly discovered devices
-- Keep implementation simple
-- Write test to ensure it has the desired options and behavior
-
-Suggested files:
-- server.py
-- templates/index.html
-- tests/test_server.py
-
-
 ## [BACKLOG]
 
 
@@ -111,6 +89,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Ping the found devices
+ID: HM-006
+Completed: 2026-04-09
+Note: Added per-device ping checkboxes on the dashboard, persisted ping selection on each device, triggered immediate ping on selection, and scheduled selected-device ping checks every 5 minutes with status updating through nmap_results.
 
 ### Feature: Device summary bar
 ID: HM-005

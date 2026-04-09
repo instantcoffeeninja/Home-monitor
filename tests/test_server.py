@@ -48,7 +48,7 @@ def test_dashboard_returns_200():
             assert "<strong>Offline:</strong>" in body
             assert "Farveforklaring" in body
             assert "class=\"dashboard-content\"" in body
-            assert ("IP" in body and "Hostname" in body and "Sidst fundet" in body) or "Ingen nmap-resultater endnu." in body
+            assert ("Ping" in body and "IP" in body and "Hostname" in body and "Sidst fundet" in body) or "Ingen nmap-resultater endnu." in body
     finally:
         server_instance.shutdown()
         server_instance.server_close()
@@ -403,3 +403,61 @@ def test_render_device_summary_bar_counts_statuses():
     assert "<strong>Online:</strong> 1" in summary
     assert "<strong>Idle:</strong> 1" in summary
     assert "<strong>Offline:</strong> 2" in summary
+
+
+def test_ping_selection_defaults_off_and_triggers_backend_ping(tmp_path):
+    db_path = tmp_path / "home_monitor_test_ping_selection.db"
+    original_db_path = server.DB_PATH
+    original_ping_host = server.ping_host
+    server.DB_PATH = str(db_path)
+
+    ping_calls = []
+
+    def fake_ping_host(ip, ping_bin=server.PING_BIN):
+        ping_calls.append(ip)
+        return True
+
+    server.ping_host = fake_ping_host
+
+    try:
+        server.init_db(server.DB_PATH)
+        server.save_scan_results([("192.168.0.81", "ping-target.local", "", "")], db_path=server.DB_PATH)
+
+        with sqlite3.connect(server.DB_PATH) as conn:
+            default_row = conn.execute("SELECT ping_enabled FROM devices WHERE ip = ?", ("192.168.0.81",)).fetchone()
+        assert default_row == (0,)
+
+        server_instance, port = start_test_server()
+        try:
+            time.sleep(0.1)
+            with urlopen(f"http://127.0.0.1:{port}/dashboard") as response:
+                body = response.read().decode("utf-8")
+                assert 'action="/dashboard/ping-selection"' in body
+                assert 'name="ping_enabled"' in body
+                assert 'value="1"' in body
+                assert "checked" not in body
+
+            payload = urlencode({"ip": "192.168.0.81", "ping_enabled": "1"}).encode("utf-8")
+            request = Request(
+                f"http://127.0.0.1:{port}/dashboard/ping-selection",
+                method="POST",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            with urlopen(request) as response:
+                assert response.status == 200
+                checked_body = response.read().decode("utf-8")
+                assert 'value="1" aria-label="Enable ping for 192.168.0.81" checked' in checked_body
+        finally:
+            server_instance.shutdown()
+            server_instance.server_close()
+
+        with sqlite3.connect(server.DB_PATH) as conn:
+            enabled_row = conn.execute("SELECT ping_enabled FROM devices WHERE ip = ?", ("192.168.0.81",)).fetchone()
+            ping_seen_count = conn.execute("SELECT COUNT(*) FROM nmap_results WHERE ip = ?", ("192.168.0.81",)).fetchone()
+        assert enabled_row == (1,)
+        assert ping_seen_count[0] >= 2
+        assert ping_calls == ["192.168.0.81"]
+    finally:
+        server.ping_host = original_ping_host
+        server.DB_PATH = original_db_path
