@@ -72,7 +72,7 @@ def test_dashboard_shows_saved_hosts(tmp_path):
     try:
         server.init_db(server.DB_PATH)
         server.save_scan_results(
-            [("192.168.0.10", "printer", ""), ("192.168.0.20", "", "")],
+            [("192.168.0.10", "printer", "", ""), ("192.168.0.20", "", "", "")],
             db_path=server.DB_PATH,
         )
 
@@ -99,8 +99,8 @@ def test_dashboard_shows_hosts_last_seen_from_previous_scans(tmp_path):
 
     try:
         server.init_db(server.DB_PATH)
-        server.save_scan_results([("192.168.0.30", "nas.local", "")], db_path=server.DB_PATH)
-        server.save_scan_results([("192.168.0.40", "tv.local", "")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.30", "nas.local", "", "")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.40", "tv.local", "", "")], db_path=server.DB_PATH)
 
         server_instance, port = start_test_server()
         try:
@@ -114,6 +114,31 @@ def test_dashboard_shows_hosts_last_seen_from_previous_scans(tmp_path):
         finally:
             server_instance.shutdown()
             server_instance.server_close()
+    finally:
+        server.DB_PATH = original_db_path
+
+
+def test_dashboard_shows_vendor_name_with_mac_fallback(tmp_path):
+    db_path = tmp_path / "home_monitor_test_vendor.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        server.save_scan_results(
+            [
+                ("192.168.0.91", "speaker.local", "AA:BB:CC:DD:EE:11", "Acme Corp"),
+                ("192.168.0.92", "camera.local", "AA:BB:CC:DD:EE:22", ""),
+            ],
+            db_path=server.DB_PATH,
+        )
+
+        rows = server.get_dashboard_rows(server.DB_PATH)
+        rendered_table = server.render_hosts_table(rows)
+        assert "speaker.local" in rendered_table
+        assert "(Acme Corp)" in rendered_table
+        assert "camera.local" in rendered_table
+        assert "(AA:BB:CC:DD:EE:22)" in rendered_table
     finally:
         server.DB_PATH = original_db_path
 
@@ -142,7 +167,7 @@ def test_dashboard_status_color_classes(tmp_path):
             conn.commit()
 
         rows = server.get_dashboard_rows(server.DB_PATH)
-        status_by_ip = {ip: status for ip, _hostname, _last_seen, status in rows}
+        status_by_ip = {ip: status for ip, _hostname, _last_seen, status, _mac, _vendor in rows}
 
         assert status_by_ip["192.168.0.10"] == "status-offline"
         assert status_by_ip["192.168.0.20"] == "status-offline"
@@ -226,10 +251,10 @@ def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
 
     try:
         server.init_db(server.DB_PATH)
-        server.save_scan_results([("192.168.0.70", "", "AA:AA:AA:AA:AA:AA")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.70", "", "AA:AA:AA:AA:AA:AA", "")], db_path=server.DB_PATH)
 
         rows = server.get_dashboard_rows(server.DB_PATH)
-        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status in rows}
+        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status, _mac, _vendor in rows}
         assert hostname_by_ip["192.168.0.70"] == "192.168.0.70"
 
         server_instance, port = start_test_server()
@@ -259,7 +284,7 @@ def test_history_page_can_update_hostname_and_defaults_to_ip(tmp_path):
         assert override_row == ("Min Laptop",)
 
         rows_after_update = server.get_dashboard_rows(server.DB_PATH)
-        hostname_by_ip_after_update = {ip: hostname for ip, hostname, _last_seen, _status in rows_after_update}
+        hostname_by_ip_after_update = {ip: hostname for ip, hostname, _last_seen, _status, _mac, _vendor in rows_after_update}
         assert hostname_by_ip_after_update["192.168.0.70"] == "Min Laptop"
     finally:
         server.DB_PATH = original_db_path
@@ -275,10 +300,10 @@ def test_avahi_resolve_result_is_used_for_blank_hostname(tmp_path):
         server.init_db(server.DB_PATH)
         server.resolve_hostname_with_avahi = lambda _ip, avahi_resolve_bin=server.AVAHI_RESOLVE_BIN: "resolved.local"
 
-        server.save_scan_results([("192.168.0.88", "", "")], db_path=server.DB_PATH)
+        server.save_scan_results([("192.168.0.88", "", "", "")], db_path=server.DB_PATH)
 
         rows = server.get_dashboard_rows(server.DB_PATH)
-        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status in rows}
+        hostname_by_ip = {ip: hostname for ip, hostname, _last_seen, _status, _mac, _vendor in rows}
         assert hostname_by_ip["192.168.0.88"] == "resolved.local"
     finally:
         server.resolve_hostname_with_avahi = original_resolver
@@ -296,10 +321,10 @@ def test_dashboard_scan_button_triggers_scan_and_refreshes_ui(tmp_path):
     def fake_scan_and_store(db_path=None, network_range=server.NETWORK_RANGE, nmap_bin=server.NMAP_BIN):
         call_count["value"] += 1
         server.save_scan_results(
-            [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF")],
+            [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF", "")],
             db_path=db_path or server.DB_PATH,
         )
-        return [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF")]
+        return [("192.168.0.80", "scan-device.local", "AA:BB:CC:DD:EE:FF", "")]
 
     server.scan_and_store = fake_scan_and_store
 

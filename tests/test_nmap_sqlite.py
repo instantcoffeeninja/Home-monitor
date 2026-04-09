@@ -34,22 +34,22 @@ Host: 192.168.0.12 (tv.local) Status: Up MAC Address: AA:BB:CC:DD:EE:FF (Vendor)
     saved_hosts = server.scan_and_store(db_path=str(db_path), network_range="192.168.0.0/24", nmap_bin="nmap")
 
     assert saved_hosts == [
-        ("192.168.0.2", "router.local", ""),
-        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF"),
+        ("192.168.0.2", "router.local", "", ""),
+        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF", "Vendor"),
     ]
 
     with sqlite3.connect(str(db_path)) as conn:
         connection_check = conn.execute("SELECT 1").fetchone()[0]
         assert connection_check == 1
 
-        rows = conn.execute("SELECT ip, hostname, mac_address FROM nmap_results ORDER BY ip ASC").fetchall()
-        device_rows = conn.execute("SELECT ip, hostname, mac_address FROM devices ORDER BY ip ASC").fetchall()
+        rows = conn.execute("SELECT ip, hostname, mac_address, COALESCE(mac_vendor, '') FROM nmap_results ORDER BY ip ASC").fetchall()
+        device_rows = conn.execute("SELECT ip, hostname, mac_address, COALESCE(mac_vendor, '') FROM devices ORDER BY ip ASC").fetchall()
 
     assert rows == [
-        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF"),
-        ("192.168.0.2", "router.local", ""),
+        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF", "Vendor"),
+        ("192.168.0.2", "router.local", "", ""),
     ]
     assert device_rows == [
-        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF"),
-        ("192.168.0.2", "router.local", None),
+        ("192.168.0.12", "tv.local", "AA:BB:CC:DD:EE:FF", "Vendor"),
+        ("192.168.0.2", "router.local", None, ""),
     ]
