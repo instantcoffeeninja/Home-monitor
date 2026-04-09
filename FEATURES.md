@@ -35,9 +35,6 @@ Suggested files:
 - templates/index.html
 
 
-## [BACKLOG]
-
-
 ### Feature: Device summary bar
 ID: HM-005
 
@@ -55,22 +52,29 @@ Suggested files:
 - templates/index.html
 
 
-### Feature: Scan network button
+### Feature: Ping the found devices
 ID: HM-006
 
 Description:
-Allow the user to trigger a manual network scan from the dashboard.
+Add a checkbox to the far left side of the table - this enabled ping if selected.
+The devices that nmap has identified and placed in the database are to be ping'ed once every 5 minutes and status is shown just like the nmap result.
+No additional column for status is needed.
 
 Acceptance criteria:
-- Add a "Scan network" button to the UI
-- Trigger backend scan when clicked
-- Refresh device list after scan
+- It is possible to select each item individually
+- Trigger backend "ping" when selected
+- Selection is stored in the database on each device
+- Default is NOT selected, also on newly discovered devices
 - Keep implementation simple
+- Write test to ensure it has the desired options and behavior
 
 Suggested files:
 - server.py
 - templates/index.html
 - tests/test_server.py
+
+
+## [BACKLOG]
 
 
 ### Feature: Auto-refresh dashboard
