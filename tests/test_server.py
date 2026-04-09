@@ -42,6 +42,10 @@ def test_dashboard_returns_200():
             assert "Sidste server-restart:" in body
             assert "Aktive enheder (192.168.0.x)" in body
             assert "Scan network" in body
+            assert "<strong>Total:</strong>" in body
+            assert "<strong>Online:</strong>" in body
+            assert "<strong>Idle:</strong>" in body
+            assert "<strong>Offline:</strong>" in body
             assert "Farveforklaring" in body
             assert "class=\"dashboard-content\"" in body
             assert ("IP" in body and "Hostname" in body and "Sidst fundet" in body) or "Ingen nmap-resultater endnu." in body
@@ -383,3 +387,19 @@ def test_resolve_hostname_with_avahi_uses_expected_command(monkeypatch):
 
     assert called["command"] == [server.AVAHI_RESOLVE_BIN, "-a", "192.168.0.90"]
     assert resolved == "printer.local"
+
+
+def test_render_device_summary_bar_counts_statuses():
+    rows = [
+        ("192.168.0.10", "online", "2026-04-06T11:59:40+00:00", "status-online", "", ""),
+        ("192.168.0.20", "idle", "2026-04-06T11:55:00+00:00", "status-idle", "", ""),
+        ("192.168.0.30", "offline", "2026-04-06T10:00:00+00:00", "status-offline", "", ""),
+        ("192.168.0.40", "offline-2", "2026-04-06T09:00:00+00:00", "status-offline", "", ""),
+    ]
+
+    summary = server.render_device_summary_bar(rows)
+
+    assert "<strong>Total:</strong> 4" in summary
+    assert "<strong>Online:</strong> 1" in summary
+    assert "<strong>Idle:</strong> 1" in summary
+    assert "<strong>Offline:</strong> 2" in summary

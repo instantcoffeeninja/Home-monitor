@@ -19,23 +19,6 @@ When working from this file:
 ## [READY]
 
 
-### Feature: Device summary bar
-ID: HM-005
-
-Description:
-Show a summary bar at the top of the dashboard.
-
-Acceptance criteria:
-- Display total number of devices
-- Display count of online devices
-- Display count of idle devices
-- Display count of offline devices
-
-Suggested files:
-- server.py
-- templates/index.html
-
-
 ### Feature: Ping the found devices
 ID: HM-006
 
@@ -128,6 +111,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Device summary bar
+ID: HM-005
+Completed: 2026-04-09
+Note: Added a dashboard summary bar showing total, online, idle, and offline device counts based on current status classes.
 
 ### Feature: Device vendor display
 ID: HM-004

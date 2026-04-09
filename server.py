@@ -414,6 +414,24 @@ def render_status_legend() -> str:
     """
 
 
+def render_device_summary_bar(rows: list[tuple[str, str, str, str, str, str]]) -> str:
+    """Builds summary counts for total and each status bucket."""
+
+    total_devices = len(rows)
+    online_devices = sum(1 for _ip, _hn, _ls, status, _mac, _vendor in rows if status == "status-online")
+    idle_devices = sum(1 for _ip, _hn, _ls, status, _mac, _vendor in rows if status == "status-idle")
+    offline_devices = sum(1 for _ip, _hn, _ls, status, _mac, _vendor in rows if status == "status-offline")
+
+    return (
+        '<section class="summary-bar" aria-label="Device summary">'
+        f"<span><strong>Total:</strong> {total_devices}</span>"
+        f"<span><strong>Online:</strong> {online_devices}</span>"
+        f"<span><strong>Idle:</strong> {idle_devices}</span>"
+        f"<span><strong>Offline:</strong> {offline_devices}</span>"
+        "</section>"
+    )
+
+
 def _render_hostname_cell(hostname: str, ip: str) -> str:
     """Renders hostname as history link when present."""
 
@@ -662,6 +680,7 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         rows = get_dashboard_rows()
         hosts_table = render_hosts_table(rows)
         status_legend = render_status_legend()
+        summary_bar = render_device_summary_bar(rows)
         html = f"""<!doctype html>
 <html lang=\"da\">
   <head>
@@ -687,6 +706,17 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         font-size: 14px;
         color: #3d3d3d;
         text-align: right;
+      }}
+
+      .summary-bar {{
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        background: #fafafa;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
       }}
 
       table {{
@@ -780,6 +810,7 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
     <form method="post" action="/dashboard/scan">
       <button type="submit">Scan network</button>
     </form>
+    {summary_bar}
     <h2>Aktive enheder (192.168.0.x)</h2>
     <div class="dashboard-content">
       {hosts_table}
