@@ -41,6 +41,7 @@ def test_dashboard_returns_200():
             assert response.status == 200
             assert "Sidste server-restart:" in body
             assert "Aktive enheder (192.168.0.x)" in body
+            assert '<meta http-equiv="refresh" content="30" />' in body
             assert "Scan network" in body
             assert "<strong>Total:</strong>" in body
             assert "<strong>Online:</strong>" in body
