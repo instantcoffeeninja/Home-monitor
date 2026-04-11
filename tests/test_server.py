@@ -498,3 +498,27 @@ def test_new_devices_are_highlighted_with_badge(tmp_path):
         assert "<span class=\"new-device-badge\">New</span>" in rendered_table
     finally:
         server.DB_PATH = original_db_path
+
+
+def test_new_devices_excludes_future_first_seen(tmp_path):
+    db_path = tmp_path / "home_monitor_test_future_device.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
+                ("3026-01-01T00:00:00+00:00", "192.168.0.200", "future.local"),
+            )
+            conn.execute(
+                "INSERT INTO devices (ip, hostname) VALUES (?, ?)",
+                ("192.168.0.200", "future.local"),
+            )
+            conn.commit()
+
+        recent_ips = server.get_recently_discovered_ips(server.DB_PATH)
+        assert "192.168.0.200" not in recent_ips
+    finally:
+        server.DB_PATH = original_db_path

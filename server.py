@@ -473,6 +473,9 @@ def get_recently_discovered_ips(
 
     target_db_path = db_path or DB_PATH
     init_db(target_db_path)
+    if within_seconds < 0:
+        return set()
+
     current_time = datetime.now(timezone.utc)
     with _DB_LOCK:
         with sqlite3.connect(target_db_path) as conn:
@@ -496,7 +499,11 @@ def get_recently_discovered_ips(
         else:
             parsed = parsed.astimezone(timezone.utc)
 
-        if max(0, int((current_time - parsed).total_seconds())) <= within_seconds:
+        age_seconds = (current_time - parsed).total_seconds()
+        if age_seconds < 0:
+            continue
+
+        if age_seconds <= within_seconds:
             recent_ips.add(ip)
     return recent_ips
 
