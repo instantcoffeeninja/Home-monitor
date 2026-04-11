@@ -466,19 +466,59 @@ def get_dashboard_rows(db_path: str | None = None) -> list[tuple[str, str, str, 
     ]
 
 
-def render_hosts_table(rows: list[tuple[str, str, str, str, str, str]], ping_enabled_ips: set[str] | None = None) -> str:
+def get_recently_discovered_ips(
+    db_path: str | None = None, within_seconds: int = 5 * 60
+) -> set[str]:
+    """Returns IPs whose first seen timestamp is within the provided window."""
+
+    target_db_path = db_path or DB_PATH
+    init_db(target_db_path)
+    current_time = datetime.now(timezone.utc)
+    with _DB_LOCK:
+        with sqlite3.connect(target_db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT ip, MIN(scanned_at) AS first_seen
+                FROM nmap_results
+                GROUP BY ip
+                """
+            ).fetchall()
+
+    recent_ips: set[str] = set()
+    for ip, first_seen in rows:
+        try:
+            parsed = datetime.fromisoformat(first_seen)
+        except (TypeError, ValueError):
+            continue
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+
+        if max(0, int((current_time - parsed).total_seconds())) <= within_seconds:
+            recent_ips.add(ip)
+    return recent_ips
+
+
+def render_hosts_table(
+    rows: list[tuple[str, str, str, str, str, str]],
+    ping_enabled_ips: set[str] | None = None,
+    newly_discovered_ips: set[str] | None = None,
+) -> str:
     """Builds HTML table for hosts list."""
 
     if not rows:
         return "<p>Ingen nmap-resultater endnu.</p>"
 
     selected_ips = ping_enabled_ips or set()
+    recent_ips = newly_discovered_ips or set()
     body_rows = "\n".join(
         (
-            "<tr>"
+            f"<tr{' class=\"new-device-row\"' if ip in recent_ips else ''}>"
             f"<td><form method=\"post\" action=\"/dashboard/ping-selection\"><input type=\"hidden\" name=\"ip\" value=\"{escape(ip)}\" /><input type=\"hidden\" name=\"ping_enabled\" value=\"0\" /><input type=\"checkbox\" name=\"ping_enabled\" value=\"1\" aria-label=\"Enable ping for {escape(ip)}\" {'checked' if ip in selected_ips else ''} onchange=\"this.form.submit()\" /></form></td>"
             f"<td>{escape(ip)}</td>"
-            f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}{_render_vendor_detail(mac_vendor, mac_address)}</td>"
+            f"<td><span class=\"status-dot {status_class}\" aria-hidden=\"true\"></span>{_render_hostname_cell(hostname, ip)}{' <span class=\"new-device-badge\">New</span>' if ip in recent_ips else ''}{_render_vendor_detail(mac_vendor, mac_address)}</td>"
             f"<td>{_format_last_seen(last_seen)}</td>"
             "</tr>"
         )
@@ -805,7 +845,12 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         restart_time = format_restart_time(SERVER_RESTART_TIME)
         rows = get_dashboard_rows()
         ping_enabled_ips = get_ping_enabled_ips()
-        hosts_table = render_hosts_table(rows, ping_enabled_ips=ping_enabled_ips)
+        newly_discovered_ips = get_recently_discovered_ips()
+        hosts_table = render_hosts_table(
+            rows,
+            ping_enabled_ips=ping_enabled_ips,
+            newly_discovered_ips=newly_discovered_ips,
+        )
         status_legend = render_status_legend()
         summary_bar = render_device_summary_bar(rows)
         html = f"""<!doctype html>
@@ -860,6 +905,10 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
 
       th {{
         background: #f5f5f5;
+      }}
+
+      .new-device-row {{
+        background: #fff8e1;
       }}
 
       td form {{
@@ -931,6 +980,16 @@ class HomeMonitorHandler(BaseHTTPRequestHandler):
         display: inline-block;
         margin-right: 8px;
         vertical-align: middle;
+      }}
+
+      .new-device-badge {{
+        margin-left: 8px;
+        padding: 2px 6px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: #f57f17;
+        color: #ffffff;
+        font-weight: bold;
       }}
     </style>
   </head>

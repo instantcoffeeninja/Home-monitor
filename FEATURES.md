@@ -19,22 +19,6 @@ When working from this file:
 ## [READY]
 
 
-### Feature: Highlight new devices
-ID: HM-008
-
-Description:
-Make newly discovered devices easier to spot.
-
-Acceptance criteria:
-- Mark devices first seen within the last 5 minutes
-- Show a badge or highlight color
-- Must be visually clear but simple
-
-Suggested files:
-- server.py
-- templates/index.html
-
-
 ## [BACKLOG]
 
 
@@ -74,6 +58,11 @@ Suggested files:
 ---
 
 ## [DONE]
+
+### Feature: Highlight new devices
+ID: HM-008
+Completed: 2026-04-11
+Note: Added first-seen detection for the last 5 minutes and highlighted those rows with a simple "New" badge on the dashboard.
 
 ### Feature: Auto-refresh dashboard
 ID: HM-007

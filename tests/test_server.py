@@ -462,3 +462,39 @@ def test_ping_selection_defaults_off_and_triggers_backend_ping(tmp_path):
     finally:
         server.ping_host = original_ping_host
         server.DB_PATH = original_db_path
+
+
+def test_new_devices_are_highlighted_with_badge(tmp_path):
+    db_path = tmp_path / "home_monitor_test_new_devices.db"
+    original_db_path = server.DB_PATH
+    server.DB_PATH = str(db_path)
+
+    try:
+        server.init_db(server.DB_PATH)
+        with sqlite3.connect(server.DB_PATH) as conn:
+            conn.executemany(
+                "INSERT INTO nmap_results (scanned_at, ip, hostname) VALUES (?, ?, ?)",
+                [
+                    ((datetime.now(timezone.utc).isoformat()), "192.168.0.100", "new.local"),
+                    ("2026-01-01T00:00:00+00:00", "192.168.0.101", "old.local"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO devices (ip, hostname) VALUES (?, ?)",
+                [
+                    ("192.168.0.100", "new.local"),
+                    ("192.168.0.101", "old.local"),
+                ],
+            )
+            conn.commit()
+
+        rows = server.get_dashboard_rows(server.DB_PATH)
+        recent_ips = server.get_recently_discovered_ips(server.DB_PATH)
+        rendered_table = server.render_hosts_table(rows, newly_discovered_ips=recent_ips)
+
+        assert "192.168.0.100" in recent_ips
+        assert "192.168.0.101" not in recent_ips
+        assert "class=\"new-device-row\"" in rendered_table
+        assert "<span class=\"new-device-badge\">New</span>" in rendered_table
+    finally:
+        server.DB_PATH = original_db_path
