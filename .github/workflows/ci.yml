@@ -39,7 +39,7 @@ jobs:
 
       - name: Commit autofix changes (PR branches only)
         if: github.event_name == 'pull_request'
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "ci: apply automatic lint fixes"
 
