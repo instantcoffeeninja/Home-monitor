@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from html import escape
+from importlib.util import find_spec
 import os
 import sqlite3
 import subprocess
@@ -9,7 +10,10 @@ import threading
 import time
 from urllib.parse import quote_plus
 
-from flask import Flask, abort, redirect, render_template, request, url_for
+if find_spec("flask") is not None:
+    from flask import Flask, abort, redirect, render_template, request, url_for
+else:
+    from lite_flask import Flask, abort, redirect, render_template, request, url_for
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))

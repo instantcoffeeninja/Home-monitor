@@ -43,6 +43,13 @@ def test_unknown_page_returns_404():
     assert response.status_code == 404
 
 
+def test_history_requires_ip_query_param():
+    with server.app.test_client() as client:
+        response = client.get("/history")
+
+    assert response.status_code == 400
+
+
 def test_dashboard_shows_saved_hosts(tmp_path):
     db_path = tmp_path / "home_monitor_test.db"
     original_db_path = server.DB_PATH
