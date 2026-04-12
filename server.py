@@ -1,7 +1,5 @@
 """Minimal webserver scaffold for Home Monitor dashboard."""
 
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from html import escape
 import os
@@ -9,7 +7,9 @@ import sqlite3
 import subprocess
 import threading
 import time
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import quote_plus
+
+from flask import Flask, abort, redirect, render_template, request, url_for
 
 HOST = "0.0.0.0"
 PORT = int(os.getenv("PORT", "8000"))
@@ -728,302 +728,77 @@ def render_hostname_history_table(ip: str, saved_hostname: str, rows: list[tuple
     """
 
 
-class HomeMonitorHandler(BaseHTTPRequestHandler):
-    """Serves Home Monitor dashboard page."""
+app = Flask(__name__)
 
-    def do_POST(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
-        parsed_path = urlparse(self.path)
-        if parsed_path.path == "/dashboard/scan":
-            scan_and_store()
-            self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", "/dashboard")
-            self.end_headers()
-            return
 
-        if parsed_path.path == "/dashboard/ping-selection":
-            content_length = int(self.headers.get("Content-Length", "0"))
-            raw_body = self.rfile.read(content_length).decode("utf-8")
-            form_data = parse_qs(raw_body)
+@app.route("/health")
+def health() -> tuple[str, int, dict[str, str]]:
+    uptime_seconds = int(time.monotonic() - START_TIME_MONOTONIC)
+    body = f"OK\nUptime: {format_uptime(uptime_seconds)}"
+    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
-            ip = form_data.get("ip", [""])[0].strip()
-            enabled = form_data.get("ping_enabled", ["0"])[-1] == "1"
-            if not ip:
-                self.send_error(HTTPStatus.BAD_REQUEST, "IP field is required")
-                return
 
-            set_ping_enabled(ip, enabled)
-            self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", "/dashboard")
-            self.end_headers()
-            return
+@app.route("/")
+@app.route("/dashboard")
+def dashboard() -> str:
+    restart_time = format_restart_time(SERVER_RESTART_TIME)
+    rows = get_dashboard_rows()
+    ping_enabled_ips = get_ping_enabled_ips()
+    newly_discovered_ips = get_recently_discovered_ips()
+    hosts_table = render_hosts_table(
+        rows,
+        ping_enabled_ips=ping_enabled_ips,
+        newly_discovered_ips=newly_discovered_ips,
+    )
+    status_legend = render_status_legend()
+    summary_bar = render_device_summary_bar(rows)
+    return render_template(
+        "index.html",
+        restart_time=restart_time,
+        hosts_table=hosts_table,
+        status_legend=status_legend,
+        summary_bar=summary_bar,
+    )
 
-        if parsed_path.path != "/history/update":
-            self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
-            return
 
-        content_length = int(self.headers.get("Content-Length", "0"))
-        raw_body = self.rfile.read(content_length).decode("utf-8")
-        form_data = parse_qs(raw_body)
+@app.route("/history")
+def history() -> str:
+    selected_ip = request.args.get("ip", "").strip()
+    if not selected_ip:
+        abort(400, description="IP query parameter is required")
 
-        ip = form_data.get("ip", [""])[0].strip()
-        hostname = form_data.get("hostname", [""])[0]
-        if not ip:
-            self.send_error(HTTPStatus.BAD_REQUEST, "IP field is required")
-            return
+    history_rows = get_ip_history(selected_ip)
+    saved_hostname = get_saved_hostname(selected_ip)
+    history_table = render_hostname_history_table(selected_ip, saved_hostname, history_rows)
+    return render_template("history.html", history_table=history_table)
 
-        update_saved_hostname(ip, hostname)
-        self.send_response(HTTPStatus.SEE_OTHER)
-        self.send_header("Location", f"/history?ip={quote_plus(ip)}")
-        self.end_headers()
 
-    def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler naming)
-        parsed_path = urlparse(self.path)
-        path = parsed_path.path
-        query_params = parse_qs(parsed_path.query)
+@app.post("/history/update")
+def update_history() -> tuple[str, int] | tuple[object, int]:
+    ip = request.form.get("ip", "").strip()
+    hostname = request.form.get("hostname", "")
+    if not ip:
+        abort(400, description="IP field is required")
 
-        if path == "/health":
-            uptime_seconds = int(time.monotonic() - START_TIME_MONOTONIC)
-            body = f"OK\nUptime: {format_uptime(uptime_seconds)}".encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+    update_saved_hostname(ip, hostname)
+    return redirect(url_for("history", ip=ip), code=303)
 
-        if path == "/history":
-            ip_values = query_params.get("ip", [])
-            selected_ip = ip_values[0].strip() if ip_values else ""
-            if not selected_ip:
-                self.send_error(HTTPStatus.BAD_REQUEST, "IP query parameter is required")
-                return
 
-            history_rows = get_ip_history(selected_ip)
-            saved_hostname = get_saved_hostname(selected_ip)
-            history_table = render_hostname_history_table(selected_ip, saved_hostname, history_rows)
-            html = f"""<!doctype html>
-<html lang=\"da\">
-  <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>Home Monitor - Hostname historik</title>
-    <style>
-      body {{
-        margin: 0;
-        padding: 24px;
-        font-family: Arial, sans-serif;
-      }}
+@app.post("/dashboard/ping-selection")
+def update_ping_selection() -> tuple[str, int] | tuple[object, int]:
+    ip = request.form.get("ip", "").strip()
+    enabled = request.form.get("ping_enabled", "0") == "1"
+    if not ip:
+        abort(400, description="IP field is required")
 
-      table {{
-        border-collapse: collapse;
-        margin-top: 16px;
-        min-width: 450px;
-      }}
+    set_ping_enabled(ip, enabled)
+    return redirect(url_for("dashboard"), code=303)
 
-      th, td {{
-        border: 1px solid #d0d0d0;
-        padding: 8px 10px;
-        text-align: left;
-      }}
 
-      th {{
-        background: #f5f5f5;
-      }}
-    </style>
-  </head>
-  <body>
-    <h1>Home Monitor</h1>
-    {history_table}
-  </body>
-</html>
-"""
-            body = html.encode("utf-8")
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
-        if path not in {"/", "/dashboard"}:
-            self.send_error(HTTPStatus.NOT_FOUND, "Page not found")
-            return
-
-        restart_time = format_restart_time(SERVER_RESTART_TIME)
-        rows = get_dashboard_rows()
-        ping_enabled_ips = get_ping_enabled_ips()
-        newly_discovered_ips = get_recently_discovered_ips()
-        hosts_table = render_hosts_table(
-            rows,
-            ping_enabled_ips=ping_enabled_ips,
-            newly_discovered_ips=newly_discovered_ips,
-        )
-        status_legend = render_status_legend()
-        summary_bar = render_device_summary_bar(rows)
-        html = f"""<!doctype html>
-<html lang=\"da\">
-  <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <meta http-equiv=\"refresh\" content=\"30\" />
-    <title>Home Monitor</title>
-    <style>
-      body {{
-        margin: 0;
-        padding: 24px;
-        font-family: Arial, sans-serif;
-      }}
-
-      .top-bar {{
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 16px;
-      }}
-
-      .restart-time {{
-        margin: 0;
-        font-size: 14px;
-        color: #3d3d3d;
-        text-align: right;
-      }}
-
-      .summary-bar {{
-        margin-top: 12px;
-        padding: 10px 12px;
-        border: 1px solid #d0d0d0;
-        border-radius: 6px;
-        background: #fafafa;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-      }}
-
-      table {{
-        border-collapse: collapse;
-        min-width: 380px;
-      }}
-
-      th, td {{
-        border: 1px solid #d0d0d0;
-        padding: 8px 10px;
-        text-align: left;
-      }}
-
-      th {{
-        background: #f5f5f5;
-      }}
-
-      .new-device-row {{
-        background: #fff8e1;
-      }}
-
-      td form {{
-        margin: 0;
-      }}
-
-      .status-online {{
-        background: #2e7d32;
-      }}
-
-      .status-idle {{
-        background: #f9a825;
-      }}
-
-      .status-offline {{
-        background: #c62828;
-      }}
-
-      .dashboard-content {{
-        margin-top: 16px;
-        display: flex;
-        align-items: flex-start;
-        gap: 24px;
-        flex-wrap: wrap;
-      }}
-
-      .status-legend {{
-        border: 1px solid #d0d0d0;
-        border-radius: 6px;
-        padding: 12px;
-        min-width: 280px;
-        background: #fafafa;
-      }}
-
-      .status-legend h3 {{
-        margin: 0 0 10px 0;
-        font-size: 16px;
-      }}
-
-      .status-legend ul {{
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }}
-
-      .status-legend li {{
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }}
-
-      .status-legend li + li {{
-        margin-top: 8px;
-      }}
-
-      .legend-swatch {{
-        width: 14px;
-        height: 14px;
-        border: 1px solid #bdbdbd;
-        border-radius: 3px;
-        display: inline-block;
-        flex: 0 0 14px;
-      }}
-
-      .status-dot {{
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        display: inline-block;
-        margin-right: 8px;
-        vertical-align: middle;
-      }}
-
-      .new-device-badge {{
-        margin-left: 8px;
-        padding: 2px 6px;
-        font-size: 12px;
-        border-radius: 999px;
-        background: #f57f17;
-        color: #ffffff;
-        font-weight: bold;
-      }}
-    </style>
-  </head>
-  <body>
-    <div class=\"top-bar\">
-      <h1>Home Monitor</h1>
-      <p class=\"restart-time\">Sidste server-restart: {restart_time}</p>
-    </div>
-    <form method="post" action="/dashboard/scan">
-      <button type="submit">Scan network</button>
-    </form>
-    {summary_bar}
-    <h2>Aktive enheder (192.168.0.x)</h2>
-    <div class="dashboard-content">
-      {hosts_table}
-      {status_legend}
-    </div>
-  </body>
-</html>
-"""
-        body = html.encode("utf-8")
-
-        self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+@app.post("/dashboard/scan")
+def run_manual_scan() -> tuple[str, int] | tuple[object, int]:
+    scan_and_store()
+    return redirect(url_for("dashboard"), code=303)
 
 
 def main() -> None:
@@ -1034,15 +809,13 @@ def main() -> None:
     scanner_thread.start()
     ping_thread.start()
 
-    server = ThreadingHTTPServer((HOST, PORT), HomeMonitorHandler)
     print(f"Home Monitor kører på http://{HOST}:{PORT}")
     try:
-        server.serve_forever()
+        app.run(host=HOST, port=PORT)
     except KeyboardInterrupt:
         print("\nStopper server ...")
     finally:
         stop_event.set()
-        server.server_close()
 
 
 if __name__ == "__main__":
