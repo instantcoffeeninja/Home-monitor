@@ -1,0 +1,28 @@
+name: Deploy to Raspberry Pi
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy with SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PI_HOST }}
+          username: ${{ secrets.PI_USER }}
+          key: ${{ secrets.PI_SSH_KEY }}
+          port: ${{ secrets.PI_PORT || 22 }}
+          script: |
+            set -e
+            cd ${{ secrets.PI_APP_PATH }}
+            git fetch --all
+            git checkout main
+            git pull --ff-only origin main
+            sudo systemctl restart ${{ secrets.PI_SERVICE_NAME }}
