@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="refresh" content="30" />
+    <title>Home Monitor</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: Arial, sans-serif;
+      }
+
+      .top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+      }
+
+      .restart-time {
+        margin: 0;
+        font-size: 14px;
+        color: #3d3d3d;
+        text-align: right;
+      }
+
+      .summary-bar {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        background: #fafafa;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+
+      table {
+        border-collapse: collapse;
+        min-width: 380px;
+      }
+
+      th, td {
+        border: 1px solid #d0d0d0;
+        padding: 8px 10px;
+        text-align: left;
+      }
+
+      th {
+        background: #f5f5f5;
+      }
+
+      .new-device-row {
+        background: #fff8e1;
+      }
+
+      td form {
+        margin: 0;
+      }
+
+      .status-online {
+        background: #2e7d32;
+      }
+
+      .status-idle {
+        background: #f9a825;
+      }
+
+      .status-offline {
+        background: #c62828;
+      }
+
+      .dashboard-content {
+        margin-top: 16px;
+        display: flex;
+        align-items: flex-start;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+
+      .status-legend {
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        padding: 12px;
+        min-width: 280px;
+        background: #fafafa;
+      }
+
+      .status-legend h3 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }
+
+      .status-legend ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .status-legend li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .status-legend li + li {
+        margin-top: 8px;
+      }
+
+      .legend-swatch {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #bdbdbd;
+        border-radius: 3px;
+        display: inline-block;
+        flex: 0 0 14px;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+
+      .new-device-badge {
+        margin-left: 8px;
+        padding: 2px 6px;
+        font-size: 12px;
+        border-radius: 999px;
+        background: #f57f17;
+        color: #ffffff;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top-bar">
+      <h1>Home Monitor</h1>
+      <p class="restart-time">Sidste server-restart: {{ restart_time }}</p>
+    </div>
+    <form method="post" action="/dashboard/scan">
+      <button type="submit">Scan network</button>
+    </form>
+    {{ summary_bar|safe }}
+    <h2>Aktive enheder (192.168.0.x)</h2>
+    <div class="dashboard-content">
+      {{ hosts_table|safe }}
+      {{ status_legend|safe }}
+    </div>
+  </body>
+</html>
