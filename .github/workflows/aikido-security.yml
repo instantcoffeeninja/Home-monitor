@@ -1,0 +1,25 @@
+name: Aikido Security Scan
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  aikido:
+    name: Run Aikido scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Aikido security scan
+        uses: AikidoSec/github-actions-workflow@v1.0.13
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
