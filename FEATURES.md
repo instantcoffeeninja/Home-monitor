@@ -18,6 +18,50 @@ When working from this file:
 
 ## [READY]
 
+### Feature: Migrate to Flask framework
+ID: HM-011
+
+Description:
+Refactor the current minimal HTTP server to use Flask, so that routing and HTML templates are separated from Python code.
+
+Acceptance criteria:
+- Replace BaseHTTPRequestHandler server with Flask
+- Keep existing functionality:
+  - "/" route returns the dashboard HTML
+  - "/health" route returns simple OK response
+- Move HTML out of Python code into templates/index.html
+- Use Flask render_template for HTML rendering
+- Ensure server still runs via `python server.py`
+- Ensure no breaking changes to existing behavior
+- Keep database logic unchanged
+- Keep output visually identical or very similar
+
+Project structure after change:
+- server.py (Flask app)
+- templates/index.html
+- static/ (empty for now, but created)
+
+Technical requirements:
+- Add Flask to requirements.txt
+- Use Flask built-in development server
+- App should listen on 0.0.0.0 and existing PORT env variable
+- Use Jinja template syntax only if needed (keep simple)
+
+Tests:
+- Update existing tests to work with Flask test client
+- Ensure `/health` returns status 200 and body "ok"
+
+Constraints:
+- Do NOT introduce new features
+- Do NOT change database schema
+- Do NOT refactor unrelated logic
+- Keep changes minimal and focused
+
+Suggested files:
+- server.py
+- templates/index.html
+- requirements.txt
+- tests/test_server.py
 
 ## [BACKLOG]
 
