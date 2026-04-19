@@ -40,7 +40,9 @@ def test_index_route_returns_information_message(monkeypatch) -> None:
     app = create_app()
 
     handler = app.routes["/"]
-    assert handler() == "This is a test / hello world information page for Home Monitor."
+    assert (
+        handler() == "This is a test / hello world information page for Home Monitor."
+    )
 
 
 def test_run_server_uses_port_5000(monkeypatch) -> None:
