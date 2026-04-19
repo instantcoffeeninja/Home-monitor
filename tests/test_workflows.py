@@ -31,11 +31,16 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "actions/upload-artifact@v4" in deploy
 
 
-def test_manual_ssh_debug_workflow_present() -> None:
-    ssh_debug = _read(".github/workflows/ssh-connectivity-test.yml")
+def test_manual_ssh_test_workflow_matches_deploy_steps() -> None:
+    ssh_test = _read(".github/workflows/ssh-connectivity-test.yml")
 
-    assert "workflow_dispatch" in ssh_debug
-    assert "Validate SSH secret configuration" in ssh_debug
-    assert "Check TCP connectivity to SSH port" in ssh_debug
-    assert "appleboy/ssh-action" in ssh_debug
-    assert "Test SSH login and collect debug info" in ssh_debug
+    assert "workflow_dispatch" in ssh_test
+    assert "Validate SSH secret configuration" in ssh_test
+    assert "Check TCP connectivity to SSH port" in ssh_test
+    assert "appleboy/ssh-action" in ssh_test
+    assert "Deploy and restart service over SSH" in ssh_test
+    assert "git fetch --all" in ssh_test
+    assert "git checkout main" in ssh_test
+    assert "git pull --ff-only origin main" in ssh_test
+    assert "systemctl restart" in ssh_test
+    assert "systemctl is-active --quiet" in ssh_test

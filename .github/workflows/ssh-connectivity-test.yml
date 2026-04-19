@@ -17,12 +17,16 @@ jobs:
           PI_USER: ${{ secrets.PI_USER }}
           PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
           PI_PORT: ${{ secrets.PI_PORT || 22 }}
+          PI_APP_PATH: ${{ secrets.PI_APP_PATH }}
+          PI_SERVICE_NAME: ${{ secrets.PI_SERVICE_NAME }}
         run: |
           set -euo pipefail
           [ -n "$PI_HOST" ] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
           [ -n "$PI_USER" ] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
           [ -n "$PI_SSH_KEY" ] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
           [ -n "$PI_PORT" ] || { echo "Missing required secret: PI_PORT" >&2; exit 1; }
+          [ -n "$PI_APP_PATH" ] || { echo "Missing required secret: PI_APP_PATH" >&2; exit 1; }
+          [ -n "$PI_SERVICE_NAME" ] || { echo "Missing required secret: PI_SERVICE_NAME" >&2; exit 1; }
 
       - name: Check TCP connectivity to SSH port
         env:
@@ -32,7 +36,7 @@ jobs:
           set -euo pipefail
           timeout 10 bash -c "until nc -z -v -w5 \"$PI_HOST\" \"$PI_PORT\"; do sleep 1; done"
 
-      - name: Test SSH login and collect debug info
+      - name: Deploy and restart service over SSH
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PI_HOST }}
@@ -40,12 +44,14 @@ jobs:
           key: ${{ secrets.PI_SSH_KEY }}
           port: ${{ secrets.PI_PORT || 22 }}
           timeout: 30s
-          command_timeout: 2m
+          command_timeout: 5m
           script_stop: true
           script: |
             set -e
-            echo "Connected to $(hostname)"
-            whoami
-            pwd
-            uname -a
-            systemctl --version | head -n 1
+            cd ${{ secrets.PI_APP_PATH }}
+            git fetch --all
+            git checkout main
+            git pull --ff-only origin main
+            sudo systemctl restart ${{ secrets.PI_SERVICE_NAME }}
+            sudo systemctl is-active --quiet ${{ secrets.PI_SERVICE_NAME }}
+            echo "Deploy-style SSH test completed on $(hostname)"
