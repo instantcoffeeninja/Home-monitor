@@ -1,0 +1,51 @@
+name: SSH Connectivity Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH secret configuration
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
+          PI_PORT: ${{ secrets.PI_PORT || 22 }}
+        run: |
+          set -euo pipefail
+          [ -n "$PI_HOST" ] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
+          [ -n "$PI_USER" ] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
+          [ -n "$PI_SSH_KEY" ] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
+          [ -n "$PI_PORT" ] || { echo "Missing required secret: PI_PORT" >&2; exit 1; }
+
+      - name: Check TCP connectivity to SSH port
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_PORT: ${{ secrets.PI_PORT || 22 }}
+        run: |
+          set -euo pipefail
+          timeout 10 bash -c "until nc -z -v -w5 \"$PI_HOST\" \"$PI_PORT\"; do sleep 1; done"
+
+      - name: Test SSH login and collect debug info
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.PI_HOST }}
+          username: ${{ secrets.PI_USER }}
+          key: ${{ secrets.PI_SSH_KEY }}
+          port: ${{ secrets.PI_PORT || 22 }}
+          timeout: 30s
+          command_timeout: 2m
+          script_stop: true
+          script: |
+            set -e
+            echo "Connected to $(hostname)"
+            whoami
+            pwd
+            uname -a
+            systemctl --version | head -n 1

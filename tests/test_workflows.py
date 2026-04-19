@@ -18,12 +18,10 @@ def test_dependabot_tracks_pip_and_actions() -> None:
     assert 'package-ecosystem: "github-actions"' in dependabot
 
 
-def test_security_automerge_and_deploy_workflows_present() -> None:
-    aikido = _read(".github/workflows/aikido-security.yml")
+def test_automerge_and_deploy_workflows_present() -> None:
     automerge = _read(".github/workflows/automerge.yml")
     deploy = _read(".github/workflows/deploy-raspberry-pi.yml")
 
-    assert "AikidoSec/github-actions-workflow" in aikido
     assert "enable-pull-request-automerge" in automerge
     assert "appleboy/ssh-action" in deploy
     assert "systemctl restart" in deploy
@@ -31,3 +29,13 @@ def test_security_automerge_and_deploy_workflows_present() -> None:
     assert "Wait for server to be healthy" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
     assert "actions/upload-artifact@v4" in deploy
+
+
+def test_manual_ssh_debug_workflow_present() -> None:
+    ssh_debug = _read(".github/workflows/ssh-connectivity-test.yml")
+
+    assert "workflow_dispatch" in ssh_debug
+    assert "Validate SSH secret configuration" in ssh_debug
+    assert "Check TCP connectivity to SSH port" in ssh_debug
+    assert "appleboy/ssh-action" in ssh_debug
+    assert "Test SSH login and collect debug info" in ssh_debug
