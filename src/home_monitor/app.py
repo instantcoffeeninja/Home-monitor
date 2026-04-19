@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
+
+from .core import (
+    DEFAULT_DEVICES_TABLE,
+    DEFAULT_SCAN_INTERVAL_SECONDS,
+    DEFAULT_SCAN_NETWORK,
+    NetworkScanWorker,
+)
 
 DEFAULT_PORT = 5000
 
@@ -37,9 +46,24 @@ def create_app() -> _FlaskLike:
     return app
 
 
+def _build_worker() -> NetworkScanWorker:
+    scan_target = os.getenv("HOME_MONITOR_SCAN_TARGET", DEFAULT_SCAN_NETWORK)
+    scan_interval = int(os.getenv("HOME_MONITOR_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
+    db_path = Path(os.getenv("HOME_MONITOR_DB_PATH", "home_monitor.db"))
+    table_name = os.getenv("HOME_MONITOR_DEVICES_TABLE", DEFAULT_DEVICES_TABLE)
+    return NetworkScanWorker(
+        db_path=db_path,
+        scan_target=scan_target,
+        interval_seconds=scan_interval,
+        table_name=table_name,
+    )
+
+
 def run_server() -> None:
     """Run the Flask development server on the configured port."""
     app = create_app()
+    worker = _build_worker()
+    worker.start()
     app.run(host="0.0.0.0", port=DEFAULT_PORT, debug=False)
 
 
