@@ -27,3 +27,7 @@ def test_security_automerge_and_deploy_workflows_present() -> None:
     assert "enable-pull-request-automerge" in automerge
     assert "appleboy/ssh-action" in deploy
     assert "systemctl restart" in deploy
+    assert "Build screenshot URL" in deploy
+    assert "Wait for server to be healthy" in deploy
+    assert "playwright@1.54.2 screenshot" in deploy
+    assert "actions/upload-artifact@v4" in deploy
