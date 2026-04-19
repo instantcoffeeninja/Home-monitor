@@ -48,7 +48,11 @@ def create_app() -> _FlaskLike:
 
 def _build_worker() -> NetworkScanWorker:
     scan_target = os.getenv("HOME_MONITOR_SCAN_TARGET", DEFAULT_SCAN_NETWORK)
-    scan_interval = int(os.getenv("HOME_MONITOR_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)))
+    scan_interval = int(
+        os.getenv(
+            "HOME_MONITOR_SCAN_INTERVAL_SECONDS", str(DEFAULT_SCAN_INTERVAL_SECONDS)
+        )
+    )
     db_path = Path(os.getenv("HOME_MONITOR_DB_PATH", "home_monitor.db"))
     table_name = os.getenv("HOME_MONITOR_DEVICES_TABLE", DEFAULT_DEVICES_TABLE)
     return NetworkScanWorker(
