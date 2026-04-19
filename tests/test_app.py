@@ -33,6 +33,14 @@ class FakeFlaskModule(types.SimpleNamespace):
         super().__init__(Flask=flask_factory)
 
 
+class FakeWorker:
+    def __init__(self) -> None:
+        self.started = False
+
+    def start(self) -> None:
+        self.started = True
+
+
 def test_index_route_returns_information_message(monkeypatch) -> None:
     fake_flask = FakeFlaskModule()
     monkeypatch.setitem(sys.modules, "flask", fake_flask)
@@ -45,7 +53,10 @@ def test_index_route_returns_information_message(monkeypatch) -> None:
 
 def test_run_server_uses_port_5000(monkeypatch) -> None:
     fake_flask = FakeFlaskModule()
+    fake_worker = FakeWorker()
+
     monkeypatch.setitem(sys.modules, "flask", fake_flask)
+    monkeypatch.setattr("home_monitor.app._build_worker", lambda: fake_worker)
 
     run_server()
 
@@ -53,3 +64,4 @@ def test_run_server_uses_port_5000(monkeypatch) -> None:
     assert run_call["port"] == DEFAULT_PORT == 5000
     assert run_call["host"] == "0.0.0.0"
     assert run_call["debug"] is False
+    assert fake_worker.started is True
