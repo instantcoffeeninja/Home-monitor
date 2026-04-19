@@ -26,3 +26,51 @@ jobs:
             git checkout main
             git pull --ff-only origin main
             sudo systemctl restart ${{ secrets.PI_SERVICE_NAME }}
+
+      - name: Build screenshot URL
+        id: screenshot-url
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_HTTP_PORT: ${{ secrets.PI_HTTP_PORT || 80 }}
+          PI_HTTP_SCHEME: ${{ secrets.PI_HTTP_SCHEME || 'http' }}
+          PI_SCREENSHOT_PATH: ${{ secrets.PI_SCREENSHOT_PATH || '/' }}
+          PI_SCREENSHOT_URL: ${{ secrets.PI_SCREENSHOT_URL }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PI_SCREENSHOT_URL}" ]; then
+            target_url="${PI_SCREENSHOT_URL}"
+          else
+            target_url="${PI_HTTP_SCHEME}://${PI_HOST}:${PI_HTTP_PORT}${PI_SCREENSHOT_PATH}"
+          fi
+          echo "target_url=${target_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for server to be healthy
+        run: |
+          set -euo pipefail
+          target_url='${{ steps.screenshot-url.outputs.target_url }}'
+          for attempt in {1..12}; do
+            if curl --silent --show-error --fail --max-time 5 "$target_url" >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Server did not become healthy in time: $target_url" >&2
+          exit 1
+
+      - name: Install Playwright Chromium
+        run: npx --yes playwright@1.54.2 install --with-deps chromium
+
+      - name: Capture deployed page screenshot
+        run: |
+          set -euo pipefail
+          npx --yes playwright@1.54.2 screenshot \
+            --wait-for-timeout=10000 \
+            '${{ steps.screenshot-url.outputs.target_url }}' \
+            deploy-screenshot.png
+
+      - name: Upload deployment screenshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-page-screenshot
+          path: deploy-screenshot.png
+          if-no-files-found: error
