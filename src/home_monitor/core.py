@@ -58,7 +58,9 @@ def _parse_scan_target(scan_target: str) -> str:
     try:
         network = ipaddress.ip_network(scan_target, strict=False)
     except ValueError as exc:
-        raise ValueError("scan_target must be a valid network, e.g. 192.168.0.1/24") from exc
+        raise ValueError(
+            "scan_target must be a valid network, e.g. 192.168.0.1/24"
+        ) from exc
     return str(network)
 
 
@@ -118,7 +120,9 @@ def run_nmap_scan(
     return parse_nmap_output(proc.stdout)
 
 
-def ensure_devices_table(db_path: Path, table_name: str = DEFAULT_DEVICES_TABLE) -> None:
+def ensure_devices_table(
+    db_path: Path, table_name: str = DEFAULT_DEVICES_TABLE
+) -> None:
     """Ensure the legacy devices table exists before scan writes."""
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -157,7 +161,13 @@ def persist_scan_results(
                 last_seen=excluded.last_seen
             """,
             [
-                (device.ip_address, device.host_name, device.mac_address, device.vendor, seen_at)
+                (
+                    device.ip_address,
+                    device.host_name,
+                    device.mac_address,
+                    device.vendor,
+                    seen_at,
+                )
                 for device in devices
             ],
         )
@@ -191,7 +201,9 @@ class NetworkScanWorker:
             return
 
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="network-scan-worker")
+        self._thread = threading.Thread(
+            target=self._run_loop, daemon=True, name="network-scan-worker"
+        )
         self._thread.start()
 
     def stop(self, timeout: float = 2.0) -> None:
@@ -206,4 +218,6 @@ class NetworkScanWorker:
 
     def run_scan_once(self) -> int:
         devices = run_nmap_scan(self._scan_target)
-        return persist_scan_results(devices, db_path=self._db_path, table_name=self._table_name)
+        return persist_scan_results(
+            devices, db_path=self._db_path, table_name=self._table_name
+        )

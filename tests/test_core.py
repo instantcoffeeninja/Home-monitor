@@ -121,7 +121,9 @@ def test_persist_scan_results_upserts_into_devices_table(tmp_path: Path) -> None
     )
 
 
-def test_network_scan_worker_runs_single_scan_with_persistence(monkeypatch, tmp_path: Path) -> None:
+def test_network_scan_worker_runs_single_scan_with_persistence(
+    monkeypatch, tmp_path: Path
+) -> None:
     db_path = tmp_path / "home-monitor.db"
 
     monkeypatch.setattr(
