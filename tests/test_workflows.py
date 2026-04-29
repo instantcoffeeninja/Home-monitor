@@ -28,7 +28,7 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "Build screenshot URL" in deploy
     assert "Wait for server to be healthy" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
-    assert "actions/upload-artifact@v4" in deploy
+    assert "actions/upload-artifact@v7" in deploy
 
 
 def test_manual_ssh_test_workflow_matches_deploy_steps() -> None:

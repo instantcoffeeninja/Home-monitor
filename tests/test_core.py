@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from home_monitor.core import (
     DiscoveredDevice,
     NetworkScanWorker,
+    get_dashboard_rows,
     normalize_device_name,
     parse_nmap_output,
+    parse_nmap_grepable,
     persist_scan_results,
+    render_device_summary_bar,
+    render_hosts_table,
     run_nmap_scan,
+    save_scan_results,
     summarize_status,
 )
 
@@ -64,13 +69,22 @@ def test_run_nmap_scan_runs_expected_command() -> None:
         return subprocess.CompletedProcess(
             args=cmd,
             returncode=0,
-            stdout="Nmap scan report for 192.168.0.5\nHost is up\n",
+            stdout="Host: 192.168.0.5 (camera.local)\tStatus: Up\n",
         )
 
     devices = run_nmap_scan("192.168.0.1/24", runner=fake_runner)
 
-    assert calls == [["nmap", "-sn", "192.168.0.0/24"]]
+    assert calls == [["nmap", "-sn", "-R", "192.168.0.0/24", "-oG", "-"]]
     assert devices[0].ip_address == "192.168.0.5"
+    assert devices[0].host_name == "camera.local"
+
+
+def test_parse_nmap_grepable_extracts_mac_vendor() -> None:
+    output = "Host: 192.168.0.10 (speaker.local)\tStatus: Up\tMAC Address: AA:BB:CC:DD:EE:FF (Acme)\n"
+
+    assert parse_nmap_grepable(output) == [
+        ("192.168.0.10", "speaker.local", "AA:BB:CC:DD:EE:FF", "Acme")
+    ]
 
 
 def test_persist_scan_results_upserts_into_devices_table(tmp_path: Path) -> None:
@@ -95,19 +109,22 @@ def test_persist_scan_results_upserts_into_devices_table(tmp_path: Path) -> None
     first_written = persist_scan_results(
         first_scan,
         db_path=db_path,
-        now=datetime(2026, 4, 19, tzinfo=UTC),
+        now=datetime(2026, 4, 19, tzinfo=timezone.utc),
     )
     second_written = persist_scan_results(
         second_scan,
         db_path=db_path,
-        now=datetime(2026, 4, 20, tzinfo=UTC),
+        now=datetime(2026, 4, 20, tzinfo=timezone.utc),
     )
 
     import sqlite3
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute(
-            "SELECT ip_address, host_name, mac_address, vendor, last_seen FROM devices"
+            "SELECT ip, hostname, mac_address, mac_vendor FROM devices"
+        ).fetchone()
+        history_count = conn.execute(
+            "SELECT COUNT(*) FROM nmap_results WHERE ip = ?", ("192.168.0.10",)
         ).fetchone()
 
     assert first_written == 1
@@ -117,11 +134,13 @@ def test_persist_scan_results_upserts_into_devices_table(tmp_path: Path) -> None
         "smart-tv",
         "11:22:33:44:55:66",
         "Samsung",
-        "2026-04-20T00:00:00+00:00",
     )
+    assert history_count == (2,)
 
 
-def test_network_scan_worker_runs_single_scan_with_persistence(monkeypatch, tmp_path: Path) -> None:
+def test_network_scan_worker_runs_single_scan_with_persistence(
+    monkeypatch, tmp_path: Path
+) -> None:
     db_path = tmp_path / "home-monitor.db"
 
     monkeypatch.setattr(
@@ -140,3 +159,26 @@ def test_network_scan_worker_runs_single_scan_with_persistence(monkeypatch, tmp_
     inserted = worker.run_scan_once()
 
     assert inserted == 1
+
+
+def test_dashboard_rows_and_rendered_summary_use_saved_scan_results(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "home-monitor.db"
+
+    save_scan_results(
+        [
+            ("192.168.0.40", "nas.local", "AA:BB:CC:DD:EE:11", "Synology"),
+            ("192.168.0.41", "", "", ""),
+        ],
+        db_path=db_path,
+    )
+
+    rows = get_dashboard_rows(db_path)
+    rendered_table = render_hosts_table(rows)
+    rendered_summary = render_device_summary_bar(rows)
+
+    assert "nas.local" in rendered_table
+    assert "192.168.0.41" in rendered_table
+    assert "(Synology)" in rendered_table
+    assert "<strong>Total:</strong> 2" in rendered_summary

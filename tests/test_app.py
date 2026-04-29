@@ -1,67 +1,57 @@
-import sys
-import types
+import os
 
-from home_monitor.app import DEFAULT_PORT, create_app, run_server
-
-
-class FakeFlaskApp:
-    def __init__(self, import_name: str) -> None:
-        self.import_name = import_name
-        self.routes: dict[str, object] = {}
-        self.run_calls: list[dict[str, object]] = []
-
-    def get(self, rule: str):
-        def decorator(fn):
-            self.routes[rule] = fn
-            return fn
-
-        return decorator
-
-    def run(self, host: str, port: int, debug: bool) -> None:
-        self.run_calls.append({"host": host, "port": port, "debug": debug})
+from home_monitor.app import DEFAULT_PORT, create_app
 
 
-class FakeFlaskModule(types.SimpleNamespace):
-    def __init__(self) -> None:
-        self.last_app: FakeFlaskApp | None = None
-
-        def flask_factory(import_name: str) -> FakeFlaskApp:
-            app = FakeFlaskApp(import_name)
-            self.last_app = app
-            return app
-
-        super().__init__(Flask=flask_factory)
-
-
-class FakeWorker:
-    def __init__(self) -> None:
-        self.started = False
-
-    def start(self) -> None:
-        self.started = True
-
-
-def test_index_route_returns_information_message(monkeypatch) -> None:
-    fake_flask = FakeFlaskModule()
-    monkeypatch.setitem(sys.modules, "flask", fake_flask)
-
+def test_dashboard_returns_old_home_monitor_ui(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("HOME_MONITOR_DB_PATH", str(tmp_path / "home-monitor.db"))
     app = create_app()
 
-    handler = app.routes["/"]
-    assert handler() == "This is a test / hello world information page for Home Monitor."
+    with app.test_client() as client:
+        response = client.get("/dashboard")
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Home Monitor" in body
+    assert "Sidste server-restart:" in body
+    assert "Aktive enheder (192.168.0.x)" in body
+    assert '<meta http-equiv="refresh" content="30" />' in body
+    assert "Scan network" in body
+    assert "Farveforklaring" in body
+    assert "<strong>Total:</strong>" in body
 
 
-def test_run_server_uses_port_5000(monkeypatch) -> None:
-    fake_flask = FakeFlaskModule()
-    fake_worker = FakeWorker()
+def test_root_serves_dashboard(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("HOME_MONITOR_DB_PATH", str(tmp_path / "home-monitor.db"))
+    app = create_app()
 
-    monkeypatch.setitem(sys.modules, "flask", fake_flask)
-    monkeypatch.setattr("home_monitor.app._build_worker", lambda: fake_worker)
+    with app.test_client() as client:
+        response = client.get("/")
 
-    run_server()
+    assert response.status_code == 200
+    assert "Home Monitor" in response.get_data(as_text=True)
 
-    run_call = fake_flask.last_app.run_calls[0]
-    assert run_call["port"] == DEFAULT_PORT == 5000
-    assert run_call["host"] == "0.0.0.0"
-    assert run_call["debug"] is False
-    assert fake_worker.started is True
+
+def test_health_returns_uptime() -> None:
+    app = create_app()
+
+    with app.test_client() as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert "OK" in response.get_data(as_text=True)
+    assert "Uptime:" in response.get_data(as_text=True)
+
+
+def test_history_requires_ip_query_param() -> None:
+    app = create_app()
+
+    with app.test_client() as client:
+        response = client.get("/history")
+
+    assert response.status_code == 400
+
+
+def test_default_port_remains_5000() -> None:
+    assert DEFAULT_PORT == 5000
+    assert os.getenv("PORT", str(DEFAULT_PORT)) == "5000"
