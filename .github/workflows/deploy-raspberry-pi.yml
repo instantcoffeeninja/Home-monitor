@@ -103,19 +103,25 @@ jobs:
           echo
           echo "=== DEPLOY DONE ==="
 
-      - name: Install Playwright Chromium
-        run: npx --yes playwright@1.54.2 install chromium
-
       - name: Capture local deployed page screenshot
+        id: screenshot
         run: |
           set -euo pipefail
+          if ! command -v npx >/dev/null; then
+            echo "npx is not installed on this runner; skipping screenshot capture."
+            echo "captured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           sleep 30
+          npx --yes playwright@1.54.2 install chromium
           npx --yes playwright@1.54.2 screenshot \
             --wait-for-timeout=10000 \
             "http://127.0.0.1:${PI_APP_PORT}/" \
             deploy-screenshot.png
+          echo "captured=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload deployment screenshot artifact
+        if: steps.screenshot.outputs.captured == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: deployed-page-screenshot

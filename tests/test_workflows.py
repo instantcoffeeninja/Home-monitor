@@ -44,6 +44,9 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "for attempt in {1..30}" in deploy
     assert "http://127.0.0.1:${PI_APP_PORT}/health" in deploy
     assert "sleep 30" in deploy
+    assert "command -v npx" in deploy
+    assert "skipping screenshot capture" in deploy
+    assert "if: steps.screenshot.outputs.captured == 'true'" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
     assert "actions/upload-artifact@v7" in deploy
 
