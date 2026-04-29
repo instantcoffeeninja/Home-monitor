@@ -41,7 +41,9 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "systemctl is-active --quiet" in deploy
     assert "journalctl -u" in deploy
     assert "LOCAL HEALTH CHECK" in deploy
+    assert "for attempt in {1..30}" in deploy
     assert "http://127.0.0.1:${PI_APP_PORT}/health" in deploy
+    assert "sleep 30" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
     assert "actions/upload-artifact@v7" in deploy
 
