@@ -25,8 +25,15 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "enable-pull-request-automerge" in automerge
     assert "workflow_dispatch" in deploy
     assert "concurrency" in deploy
-    assert "Validate deploy secret configuration" in deploy
-    assert "appleboy/ssh-action" in deploy
+    assert "runs-on: [self-hosted, Linux, ARM64, home-monitor-pi]" in deploy
+    assert "Validate self-hosted runner environment" in deploy
+    assert "Deploy locally on Raspberry Pi" in deploy
+    assert "PI_APP_PATH: /home/pi/Home-monitor" in deploy
+    assert "PI_SERVICE_NAME: home-monitor.service" in deploy
+    assert "PI_APP_PORT: 5000" in deploy
+    assert "appleboy/ssh-action" not in deploy
+    assert "secrets.PI_HOST" not in deploy
+    assert "secrets.PI_SSH_KEY" not in deploy
     assert "git status --short" in deploy
     assert "git log --oneline -5" in deploy
     assert "python -m pip install -r requirements.txt" in deploy
@@ -34,9 +41,7 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "systemctl is-active --quiet" in deploy
     assert "journalctl -u" in deploy
     assert "LOCAL HEALTH CHECK" in deploy
-    assert "127.0.0.1:${{ secrets.PI_APP_PORT || 5000 }}/health" in deploy
-    assert "Build screenshot URL" in deploy
-    assert "Wait for server to be healthy" in deploy
+    assert "http://127.0.0.1:${PI_APP_PORT}/health" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
     assert "actions/upload-artifact@v7" in deploy
 

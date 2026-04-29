@@ -15,131 +15,90 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux, ARM64, home-monitor-pi]
+    timeout-minutes: 10
+    env:
+      PI_APP_PATH: /home/pi/Home-monitor
+      PI_SERVICE_NAME: home-monitor.service
+      PI_APP_PORT: 5000
     steps:
-      - name: Validate deploy secret configuration
-        env:
-          PI_HOST: ${{ secrets.PI_HOST }}
-          PI_USER: ${{ secrets.PI_USER }}
-          PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
-          PI_PORT: ${{ secrets.PI_PORT || 22 }}
-          PI_APP_PATH: ${{ secrets.PI_APP_PATH }}
-          PI_SERVICE_NAME: ${{ secrets.PI_SERVICE_NAME }}
+      - name: Validate self-hosted runner environment
         run: |
           set -euo pipefail
-          [ -n "$PI_HOST" ] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
-          [ -n "$PI_USER" ] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
-          [ -n "$PI_SSH_KEY" ] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
-          [ -n "$PI_PORT" ] || { echo "Missing required secret: PI_PORT" >&2; exit 1; }
-          [ -n "$PI_APP_PATH" ] || { echo "Missing required secret: PI_APP_PATH" >&2; exit 1; }
-          [ -n "$PI_SERVICE_NAME" ] || { echo "Missing required secret: PI_SERVICE_NAME" >&2; exit 1; }
+          [ -d "$PI_APP_PATH" ] || { echo "Missing app path: $PI_APP_PATH" >&2; exit 1; }
+          command -v git >/dev/null
+          command -v python3 >/dev/null
+          command -v curl >/dev/null
+          command -v sudo >/dev/null
 
-      - name: Deploy with SSH
-        uses: appleboy/ssh-action@v1.2.5
-        with:
-          host: ${{ secrets.PI_HOST }}
-          username: ${{ secrets.PI_USER }}
-          key: ${{ secrets.PI_SSH_KEY }}
-          port: ${{ secrets.PI_PORT || 22 }}
-          timeout: 30s
-          command_timeout: 5m
-          script_stop: true
-          script: |
-            set -euo pipefail
-            cd ${{ secrets.PI_APP_PATH }}
-
-            echo "=== DEPLOY START ==="
-            date
-            echo "Event: ${{ github.event_name }}"
-
-            echo "=== CURRENT DIRECTORY ==="
-            pwd
-
-            echo "=== CURRENT BRANCH ==="
-            git branch --show-current
-
-            echo "=== REMOTES ==="
-            git remote -v
-
-            echo "=== STATUS BEFORE PULL ==="
-            git status --short
-
-            echo "=== PULLING LATEST CODE ==="
-            git fetch --all
-            git checkout main
-            git pull --ff-only origin main
-
-            echo "=== LATEST COMMITS AFTER PULL ==="
-            git log --oneline -5
-
-            echo "=== PYTHON VERSION ==="
-            python3 --version
-
-            echo "=== INSTALLING DEPENDENCIES ==="
-            if [ -d venv ]; then
-              . venv/bin/activate
-              python -m pip install -r requirements.txt
-            else
-              python3 -m pip install -r requirements.txt
-            fi
-
-            echo "=== RESTARTING SERVICE ==="
-            sudo systemctl restart ${{ secrets.PI_SERVICE_NAME }}
-
-            echo "=== SERVICE ACTIVE CHECK ==="
-            sudo systemctl is-active --quiet ${{ secrets.PI_SERVICE_NAME }}
-
-            echo "=== SERVICE STATUS ==="
-            sudo systemctl status ${{ secrets.PI_SERVICE_NAME }} --no-pager
-
-            echo "=== RECENT SERVICE LOGS ==="
-            sudo journalctl -u ${{ secrets.PI_SERVICE_NAME }} -n 40 --no-pager
-
-            echo "=== LOCAL HEALTH CHECK ==="
-            curl --silent --show-error --fail --max-time 5 "http://127.0.0.1:${{ secrets.PI_APP_PORT || 5000 }}/health"
-
-            echo
-            echo "=== DEPLOY DONE ==="
-
-      - name: Build screenshot URL
-        id: screenshot-url
-        env:
-          PI_HOST: ${{ secrets.PI_HOST }}
-          PI_HTTP_PORT: ${{ secrets.PI_HTTP_PORT || 80 }}
-          PI_HTTP_SCHEME: ${{ secrets.PI_HTTP_SCHEME || 'http' }}
-          PI_SCREENSHOT_PATH: ${{ secrets.PI_SCREENSHOT_PATH || '/' }}
-          PI_SCREENSHOT_URL: ${{ secrets.PI_SCREENSHOT_URL }}
+      - name: Deploy locally on Raspberry Pi
         run: |
           set -euo pipefail
-          if [ -n "${PI_SCREENSHOT_URL}" ]; then
-            target_url="${PI_SCREENSHOT_URL}"
+          cd "$PI_APP_PATH"
+
+          echo "=== DEPLOY START ==="
+          date
+          echo "Event: ${{ github.event_name }}"
+          echo "Runner: $RUNNER_NAME"
+
+          echo "=== CURRENT DIRECTORY ==="
+          pwd
+
+          echo "=== CURRENT BRANCH ==="
+          git branch --show-current
+
+          echo "=== REMOTES ==="
+          git remote -v
+
+          echo "=== STATUS BEFORE PULL ==="
+          git status --short
+
+          echo "=== PULLING LATEST CODE ==="
+          git fetch --all
+          git checkout main
+          git pull --ff-only origin main
+
+          echo "=== LATEST COMMITS AFTER PULL ==="
+          git log --oneline -5
+
+          echo "=== PYTHON VERSION ==="
+          python3 --version
+
+          echo "=== INSTALLING DEPENDENCIES ==="
+          if [ -d venv ]; then
+            . venv/bin/activate
+            python -m pip install -r requirements.txt
           else
-            target_url="${PI_HTTP_SCHEME}://${PI_HOST}:${PI_HTTP_PORT}${PI_SCREENSHOT_PATH}"
+            python3 -m pip install -r requirements.txt
           fi
-          echo "target_url=${target_url}" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for server to be healthy
-        run: |
-          set -euo pipefail
-          target_url='${{ steps.screenshot-url.outputs.target_url }}'
-          for attempt in {1..12}; do
-            if curl --silent --show-error --fail --max-time 5 "$target_url" >/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Server did not become healthy in time: $target_url" >&2
-          exit 1
+          echo "=== RESTARTING SERVICE ==="
+          sudo systemctl restart "$PI_SERVICE_NAME"
+
+          echo "=== SERVICE ACTIVE CHECK ==="
+          sudo systemctl is-active --quiet "$PI_SERVICE_NAME"
+
+          echo "=== SERVICE STATUS ==="
+          sudo systemctl status "$PI_SERVICE_NAME" --no-pager
+
+          echo "=== RECENT SERVICE LOGS ==="
+          sudo journalctl -u "$PI_SERVICE_NAME" -n 40 --no-pager
+
+          echo "=== LOCAL HEALTH CHECK ==="
+          curl --silent --show-error --fail --max-time 5 "http://127.0.0.1:${PI_APP_PORT}/health"
+
+          echo
+          echo "=== DEPLOY DONE ==="
 
       - name: Install Playwright Chromium
-        run: npx --yes playwright@1.54.2 install --with-deps chromium
+        run: npx --yes playwright@1.54.2 install chromium
 
-      - name: Capture deployed page screenshot
+      - name: Capture local deployed page screenshot
         run: |
           set -euo pipefail
           npx --yes playwright@1.54.2 screenshot \
             --wait-for-timeout=10000 \
-            '${{ steps.screenshot-url.outputs.target_url }}' \
+            "http://127.0.0.1:${PI_APP_PORT}/" \
             deploy-screenshot.png
 
       - name: Upload deployment screenshot artifact
