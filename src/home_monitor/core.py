@@ -255,6 +255,11 @@ def init_db(db_path: str | Path = "home_monitor.db") -> None:
             conn.execute(
                 "UPDATE devices SET hostname = COALESCE(NULLIF(hostname, ''), ip)"
             )
+            if _devices_table_needs_rebuild(conn):
+                _rebuild_devices_table(conn)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_ip ON devices(ip)"
+            )
             conn.commit()
 
 
@@ -273,6 +278,41 @@ def _ensure_columns(
             conn.execute(
                 f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
             )
+
+
+def _devices_table_needs_rebuild(conn: sqlite3.Connection) -> bool:
+    columns = _table_columns(conn, "devices")
+    legacy_columns = {"ip_address", "host_name", "vendor", "last_seen"}
+    return bool(columns & legacy_columns)
+
+
+def _rebuild_devices_table(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE IF EXISTS devices_migrated")
+    conn.execute(
+        """
+        CREATE TABLE devices_migrated (
+            ip TEXT PRIMARY KEY,
+            hostname TEXT NOT NULL,
+            mac_address TEXT,
+            mac_vendor TEXT,
+            ping_enabled INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO devices_migrated (ip, hostname, mac_address, mac_vendor, ping_enabled)
+        SELECT ip,
+               COALESCE(NULLIF(hostname, ''), ip),
+               mac_address,
+               mac_vendor,
+               COALESCE(ping_enabled, 0)
+        FROM devices
+        WHERE ip IS NOT NULL AND ip <> ''
+        """
+    )
+    conn.execute("DROP TABLE devices")
+    conn.execute("ALTER TABLE devices_migrated RENAME TO devices")
 
 
 def _normalize_hostname(hostname: str | None, ip: str) -> str:

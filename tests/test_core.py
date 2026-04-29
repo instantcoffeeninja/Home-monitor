@@ -182,3 +182,51 @@ def test_dashboard_rows_and_rendered_summary_use_saved_scan_results(
     assert "192.168.0.41" in rendered_table
     assert "(Synology)" in rendered_table
     assert "<strong>Total:</strong> 2" in rendered_summary
+
+
+def test_old_devices_schema_is_migrated_for_scan_upserts(tmp_path: Path) -> None:
+    db_path = tmp_path / "old-home-monitor.db"
+
+    import sqlite3
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE devices (
+                ip_address TEXT PRIMARY KEY,
+                host_name TEXT,
+                mac_address TEXT,
+                vendor TEXT,
+                last_seen TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO devices (ip_address, host_name, mac_address, vendor, last_seen)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "192.168.0.50",
+                "old-name",
+                "AA:BB:CC:DD:EE:50",
+                "Old Vendor",
+                "2026-04-01T00:00:00+00:00",
+            ),
+        )
+        conn.commit()
+
+    save_scan_results(
+        [("192.168.0.50", "new-name", "AA:BB:CC:DD:EE:50", "New Vendor")],
+        db_path=db_path,
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT ip, hostname, mac_address, mac_vendor FROM devices WHERE ip = ?",
+            ("192.168.0.50",),
+        ).fetchone()
+        indexes = conn.execute("PRAGMA index_list(devices)").fetchall()
+
+    assert row == ("192.168.0.50", "new-name", "AA:BB:CC:DD:EE:50", "New Vendor")
+    assert any(index[1] == "idx_devices_ip" for index in indexes)
