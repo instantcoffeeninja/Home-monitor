@@ -107,17 +107,25 @@ jobs:
         id: screenshot
         run: |
           set -euo pipefail
-          if ! command -v npx >/dev/null; then
-            echo "npx is not installed on this runner; skipping screenshot capture."
+          if command -v chromium-browser >/dev/null; then
+            chromium_bin=chromium-browser
+          elif command -v chromium >/dev/null; then
+            chromium_bin=chromium
+          else
+            echo "chromium-browser/chromium is not installed on this runner; skipping screenshot capture."
             echo "captured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           sleep 30
-          npx --yes playwright@1.54.2 install chromium
-          npx --yes playwright@1.54.2 screenshot \
-            --wait-for-timeout=10000 \
-            "http://127.0.0.1:${PI_APP_PORT}/" \
-            deploy-screenshot.png
+          "$chromium_bin" \
+            --headless \
+            --no-sandbox \
+            --disable-gpu \
+            --hide-scrollbars \
+            --window-size=1280,720 \
+            --virtual-time-budget=10000 \
+            --screenshot=deploy-screenshot.png \
+            "http://127.0.0.1:${PI_APP_PORT}/"
           echo "captured=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload deployment screenshot artifact
