@@ -102,36 +102,3 @@ jobs:
 
           echo
           echo "=== DEPLOY DONE ==="
-
-      - name: Capture local deployed page screenshot
-        id: screenshot
-        run: |
-          set -euo pipefail
-          if command -v chromium-browser >/dev/null; then
-            chromium_bin=chromium-browser
-          elif command -v chromium >/dev/null; then
-            chromium_bin=chromium
-          else
-            echo "chromium-browser/chromium is not installed on this runner; skipping screenshot capture."
-            echo "captured=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          sleep 30
-          "$chromium_bin" \
-            --headless \
-            --no-sandbox \
-            --disable-gpu \
-            --hide-scrollbars \
-            --window-size=1280,720 \
-            --virtual-time-budget=10000 \
-            --screenshot=deploy-screenshot.png \
-            "http://127.0.0.1:${PI_APP_PORT}/"
-          echo "captured=true" >> "$GITHUB_OUTPUT"
-
-      - name: Upload deployment screenshot artifact
-        if: steps.screenshot.outputs.captured == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: deployed-page-screenshot
-          path: deploy-screenshot.png
-          if-no-files-found: error

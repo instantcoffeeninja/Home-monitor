@@ -43,14 +43,9 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "LOCAL HEALTH CHECK" in deploy
     assert "for attempt in {1..30}" in deploy
     assert "http://127.0.0.1:${PI_APP_PORT}/health" in deploy
-    assert "sleep 30" in deploy
-    assert "command -v chromium-browser" in deploy
-    assert "command -v chromium" in deploy
-    assert "--headless" in deploy
-    assert "--screenshot=deploy-screenshot.png" in deploy
-    assert "skipping screenshot capture" in deploy
-    assert "if: steps.screenshot.outputs.captured == 'true'" in deploy
-    assert "actions/upload-artifact@v7" in deploy
+    assert "chromium" not in deploy
+    assert "playwright" not in deploy
+    assert "deploy-screenshot.png" not in deploy
 
 
 def test_manual_ssh_test_workflow_matches_deploy_steps() -> None:
