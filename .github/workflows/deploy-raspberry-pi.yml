@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, Linux, ARM64, home-monitor-pi]
+    runs-on: self-hosted
     timeout-minutes: 10
     env:
       PI_APP_PATH: /home/pi/Home-monitor

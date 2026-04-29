@@ -25,7 +25,7 @@ def test_automerge_and_deploy_workflows_present() -> None:
     assert "enable-pull-request-automerge" in automerge
     assert "workflow_dispatch" in deploy
     assert "concurrency" in deploy
-    assert "runs-on: [self-hosted, Linux, ARM64, home-monitor-pi]" in deploy
+    assert "runs-on: self-hosted" in deploy
     assert "Validate self-hosted runner environment" in deploy
     assert "Deploy locally on Raspberry Pi" in deploy
     assert "PI_APP_PATH: /home/pi/Home-monitor" in deploy
