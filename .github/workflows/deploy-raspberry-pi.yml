@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-home-monitor
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -12,6 +17,23 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate deploy secret configuration
+        env:
+          PI_HOST: ${{ secrets.PI_HOST }}
+          PI_USER: ${{ secrets.PI_USER }}
+          PI_SSH_KEY: ${{ secrets.PI_SSH_KEY }}
+          PI_PORT: ${{ secrets.PI_PORT || 22 }}
+          PI_APP_PATH: ${{ secrets.PI_APP_PATH }}
+          PI_SERVICE_NAME: ${{ secrets.PI_SERVICE_NAME }}
+        run: |
+          set -euo pipefail
+          [ -n "$PI_HOST" ] || { echo "Missing required secret: PI_HOST" >&2; exit 1; }
+          [ -n "$PI_USER" ] || { echo "Missing required secret: PI_USER" >&2; exit 1; }
+          [ -n "$PI_SSH_KEY" ] || { echo "Missing required secret: PI_SSH_KEY" >&2; exit 1; }
+          [ -n "$PI_PORT" ] || { echo "Missing required secret: PI_PORT" >&2; exit 1; }
+          [ -n "$PI_APP_PATH" ] || { echo "Missing required secret: PI_APP_PATH" >&2; exit 1; }
+          [ -n "$PI_SERVICE_NAME" ] || { echo "Missing required secret: PI_SERVICE_NAME" >&2; exit 1; }
+
       - name: Deploy with SSH
         uses: appleboy/ssh-action@v1.2.5
         with:
@@ -19,13 +41,65 @@ jobs:
           username: ${{ secrets.PI_USER }}
           key: ${{ secrets.PI_SSH_KEY }}
           port: ${{ secrets.PI_PORT || 22 }}
+          timeout: 30s
+          command_timeout: 5m
+          script_stop: true
           script: |
-            set -e
+            set -euo pipefail
             cd ${{ secrets.PI_APP_PATH }}
+
+            echo "=== DEPLOY START ==="
+            date
+            echo "Event: ${{ github.event_name }}"
+
+            echo "=== CURRENT DIRECTORY ==="
+            pwd
+
+            echo "=== CURRENT BRANCH ==="
+            git branch --show-current
+
+            echo "=== REMOTES ==="
+            git remote -v
+
+            echo "=== STATUS BEFORE PULL ==="
+            git status --short
+
+            echo "=== PULLING LATEST CODE ==="
             git fetch --all
             git checkout main
             git pull --ff-only origin main
+
+            echo "=== LATEST COMMITS AFTER PULL ==="
+            git log --oneline -5
+
+            echo "=== PYTHON VERSION ==="
+            python3 --version
+
+            echo "=== INSTALLING DEPENDENCIES ==="
+            if [ -d venv ]; then
+              . venv/bin/activate
+              python -m pip install -r requirements.txt
+            else
+              python3 -m pip install -r requirements.txt
+            fi
+
+            echo "=== RESTARTING SERVICE ==="
             sudo systemctl restart ${{ secrets.PI_SERVICE_NAME }}
+
+            echo "=== SERVICE ACTIVE CHECK ==="
+            sudo systemctl is-active --quiet ${{ secrets.PI_SERVICE_NAME }}
+
+            echo "=== SERVICE STATUS ==="
+            sudo systemctl status ${{ secrets.PI_SERVICE_NAME }} --no-pager
+
+            echo "=== RECENT SERVICE LOGS ==="
+            sudo journalctl -u ${{ secrets.PI_SERVICE_NAME }} -n 40 --no-pager
+
+            echo "=== LOCAL HEALTH CHECK ==="
+            curl --silent --show-error --fail --max-time 5 "http://127.0.0.1:${{ secrets.PI_APP_PORT || 5000 }}/health"
+
+            echo
+            echo "=== DEPLOY DONE ==="
 
       - name: Build screenshot URL
         id: screenshot-url

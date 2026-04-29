@@ -23,8 +23,18 @@ def test_automerge_and_deploy_workflows_present() -> None:
     deploy = _read(".github/workflows/deploy-raspberry-pi.yml")
 
     assert "enable-pull-request-automerge" in automerge
+    assert "workflow_dispatch" in deploy
+    assert "concurrency" in deploy
+    assert "Validate deploy secret configuration" in deploy
     assert "appleboy/ssh-action" in deploy
+    assert "git status --short" in deploy
+    assert "git log --oneline -5" in deploy
+    assert "python -m pip install -r requirements.txt" in deploy
     assert "systemctl restart" in deploy
+    assert "systemctl is-active --quiet" in deploy
+    assert "journalctl -u" in deploy
+    assert "LOCAL HEALTH CHECK" in deploy
+    assert "127.0.0.1:${{ secrets.PI_APP_PORT || 5000 }}/health" in deploy
     assert "Build screenshot URL" in deploy
     assert "Wait for server to be healthy" in deploy
     assert "playwright@1.54.2 screenshot" in deploy
