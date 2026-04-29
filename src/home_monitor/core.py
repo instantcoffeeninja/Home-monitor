@@ -69,8 +69,8 @@ def format_uptime(total_seconds: int) -> str:
 
 
 def format_restart_time(restart_time: datetime) -> str:
-    """Format restart time in a human-friendly UTC timestamp."""
-    return restart_time.strftime("%d-%m-%Y %H:%M:%S UTC")
+    """Format restart time in a human-friendly timestamp."""
+    return restart_time.strftime("%d-%m-%Y %H:%M:%S %Z")
 
 
 def _parse_scan_target(scan_target: str) -> str:

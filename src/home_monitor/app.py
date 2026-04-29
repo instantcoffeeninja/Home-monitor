@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
+from zoneinfo import ZoneInfo
 
 from .core import (
     DEFAULT_DEVICES_TABLE,
@@ -36,8 +37,9 @@ from .core import (
 )
 
 DEFAULT_PORT = 5000
+LOCAL_TIMEZONE = ZoneInfo("Europe/Copenhagen")
 START_TIME_MONOTONIC = time.monotonic()
-SERVER_RESTART_TIME = datetime.now(timezone.utc)
+SERVER_RESTART_TIME = datetime.now(LOCAL_TIMEZONE)
 
 
 class _FlaskLike(Protocol):
@@ -155,7 +157,7 @@ def create_app() -> _FlaskLike:
     @app.post("/dashboard/ping-selection")
     def update_ping_selection():
         ip = flask.request.form.get("ip", "").strip()
-        enabled = flask.request.form.get("ping_enabled", "0") == "1"
+        enabled = "1" in flask.request.form.getlist("ping_enabled")
         if not ip:
             flask.abort(400, description="IP field is required")
 
